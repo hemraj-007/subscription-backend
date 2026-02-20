@@ -9,7 +9,7 @@ const router = Router();
 router.post(
   "/upload",
   authMiddleware,
-  upload.single("file"),
+  upload.any(),
   transactionController.upload
 );
 
