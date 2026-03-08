@@ -23,6 +23,13 @@ export const cardService = {
     });
   },
 
+  /** Returns the card only if it belongs to the user; null otherwise. */
+  async getCardForUser(userId: string, cardId: string) {
+    return prisma.creditCard.findFirst({
+      where: { id: cardId, userId },
+    });
+  },
+
   async deleteCard(userId: string, cardId: string) {
     return prisma.creditCard.deleteMany({
       where: {

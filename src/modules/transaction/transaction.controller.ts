@@ -1,7 +1,17 @@
+import fs from "fs/promises";
 import { Response } from "express";
 import { transactionService } from "./transaction.service";
 import { parseCSV } from "./transaction.parser";
+import { cardService } from "../card/card.service";
 import { AuthRequest } from "../../middlewares/auth.middleware";
+
+async function deleteUploadedFile(path: string) {
+  try {
+    await fs.unlink(path);
+  } catch {
+    // Ignore cleanup errors; avoid leaking paths in response
+  }
+}
 
 export const transactionController = {
   async upload(req: AuthRequest, res: Response) {
@@ -30,11 +40,19 @@ export const transactionController = {
       return res.status(400).json({ message: "Missing cardId" });
     }
 
-    const parsed = await parseCSV(file.path);
+    const card = await cardService.getCardForUser(req.userId!, cardId);
+    if (!card) {
+      await deleteUploadedFile(file.path);
+      return res.status(404).json({ message: "Card not found" });
+    }
 
-    await transactionService.saveTransactions(cardId, parsed);
-
-    res.json({ imported: parsed.length });
+    try {
+      const parsed = await parseCSV(file.path);
+      await transactionService.saveTransactions(cardId, parsed);
+      res.json({ imported: parsed.length });
+    } finally {
+      await deleteUploadedFile(file.path);
+    }
   },
 
   async list(req: AuthRequest, res: Response) {
