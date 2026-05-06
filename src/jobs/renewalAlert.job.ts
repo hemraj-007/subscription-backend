@@ -3,16 +3,28 @@ import { prisma } from "../config/prisma";
 const ALERT_WINDOW_DAYS = 60;
 
 export async function generateRenewalAlerts() {
+  const alertWindowEnd = new Date();
+  alertWindowEnd.setDate(alertWindowEnd.getDate() + ALERT_WINDOW_DAYS);
+
   const subscriptions = await prisma.subscription.findMany({
-    where: { status: "ACTIVE" },
+    where: {
+      status: "ACTIVE",
+      nextCharge: {
+        not: null,
+        lte: alertWindowEnd,
+      },
+    },
   });
 
   for (const sub of subscriptions) {
+    const nextCharge = sub.nextCharge;
+    if (!nextCharge) continue;
+
     const exists = await prisma.alert.findFirst({
       where: {
         userId: sub.userId,
         type: "RENEWAL",
-        scheduledAt: sub.nextCharge!,
+        scheduledAt: nextCharge,
       },
     });
 
@@ -23,7 +35,7 @@ export async function generateRenewalAlerts() {
         userId: sub.userId,
         type: "RENEWAL",
         message: `${sub.merchant} will charge ₹${sub.amount} soon`,
-        scheduledAt: sub.nextCharge!,
+        scheduledAt: nextCharge,
       },
     });
   }
