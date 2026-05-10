@@ -13,6 +13,26 @@ async function deleteUploadedFile(path: string) {
   }
 }
 
+async function deleteUploadedFiles(files: Express.Multer.File[]) {
+  await Promise.all(files.map((file) => deleteUploadedFile(file.path)));
+}
+
+function getUploadedFiles(req: AuthRequest): Express.Multer.File[] {
+  const files: Express.Multer.File[] = [];
+
+  if (req.file) {
+    files.push(req.file);
+  }
+
+  if (Array.isArray(req.files)) {
+    files.push(...req.files);
+  } else if (req.files) {
+    files.push(...Object.values(req.files).flat());
+  }
+
+  return files;
+}
+
 export const transactionController = {
   async upload(req: AuthRequest, res: Response) {
     const body = req.body ?? {};
@@ -23,11 +43,7 @@ export const transactionController = {
         : Array.isArray(rawCardId) && rawCardId[0]
           ? String(rawCardId[0]).trim()
           : "";
-    const files: Express.Multer.File[] = Array.isArray(req.files)
-      ? req.files
-      : req.files
-        ? Object.values(req.files).flat()
-        : [];
+    const files = getUploadedFiles(req);
     const file = files.find((f) => f.fieldname === "file") ?? files[0];
 
     if (!file && !cardId) {
@@ -37,12 +53,13 @@ export const transactionController = {
       return res.status(400).json({ message: "Missing file" });
     }
     if (!cardId) {
+      await deleteUploadedFiles(files);
       return res.status(400).json({ message: "Missing cardId" });
     }
 
     const card = await cardService.getCardForUser(req.userId!, cardId);
     if (!card) {
-      await deleteUploadedFile(file.path);
+      await deleteUploadedFiles(files);
       return res.status(404).json({ message: "Card not found" });
     }
 
@@ -51,7 +68,7 @@ export const transactionController = {
       await transactionService.saveTransactions(cardId, parsed);
       res.json({ imported: parsed.length });
     } finally {
-      await deleteUploadedFile(file.path);
+      await deleteUploadedFiles(files);
     }
   },
 
