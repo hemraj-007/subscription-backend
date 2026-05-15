@@ -4,15 +4,20 @@ const ALERT_WINDOW_DAYS = 60;
 
 export async function generateRenewalAlerts() {
   const subscriptions = await prisma.subscription.findMany({
-    where: { status: "ACTIVE" },
+    where: {
+      status: "ACTIVE",
+      nextCharge: { not: null },
+    },
   });
 
   for (const sub of subscriptions) {
+    if (!sub.nextCharge) continue;
+
     const exists = await prisma.alert.findFirst({
       where: {
         userId: sub.userId,
         type: "RENEWAL",
-        scheduledAt: sub.nextCharge!,
+        scheduledAt: sub.nextCharge,
       },
     });
 
@@ -23,7 +28,7 @@ export async function generateRenewalAlerts() {
         userId: sub.userId,
         type: "RENEWAL",
         message: `${sub.merchant} will charge ₹${sub.amount} soon`,
-        scheduledAt: sub.nextCharge!,
+        scheduledAt: sub.nextCharge,
       },
     });
   }
