@@ -8,11 +8,13 @@ export async function generateRenewalAlerts() {
   });
 
   for (const sub of subscriptions) {
+    if (!sub.nextCharge) continue;
+
     const exists = await prisma.alert.findFirst({
       where: {
         userId: sub.userId,
         type: "RENEWAL",
-        scheduledAt: sub.nextCharge!,
+        scheduledAt: sub.nextCharge,
       },
     });
 
@@ -23,7 +25,7 @@ export async function generateRenewalAlerts() {
         userId: sub.userId,
         type: "RENEWAL",
         message: `${sub.merchant} will charge ₹${sub.amount} soon`,
-        scheduledAt: sub.nextCharge!,
+        scheduledAt: sub.nextCharge,
       },
     });
   }
