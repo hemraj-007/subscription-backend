@@ -23,7 +23,9 @@ export const transactionController = {
         : Array.isArray(rawCardId) && rawCardId[0]
           ? String(rawCardId[0]).trim()
           : "";
-    const files: Express.Multer.File[] = Array.isArray(req.files)
+    const files: Express.Multer.File[] = req.file
+      ? [req.file]
+      : Array.isArray(req.files)
       ? req.files
       : req.files
         ? Object.values(req.files).flat()
