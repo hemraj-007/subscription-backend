@@ -5,7 +5,12 @@ export const authController = {
   async signup(req: Request, res: Response) {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      !email.trim() ||
+      !password
+    ) {
       return res.status(400).json({ message: "Missing fields" });
     }
 
@@ -20,7 +25,12 @@ export const authController = {
   async login(req: Request, res: Response) {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      !email.trim() ||
+      !password
+    ) {
       return res.status(400).json({ message: "Missing fields" });
     }
 

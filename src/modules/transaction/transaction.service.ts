@@ -1,16 +1,21 @@
 import { prisma } from "../../config/prisma";
-import { ParsedTransaction } from "./transaction.parser";
+import { ParsedTransaction } from "./transaction.types";
 
 export const transactionService = {
   async saveTransactions(cardId: string, data: ParsedTransaction[]) {
-    return prisma.transaction.createMany({
+    const result = await prisma.transaction.createMany({
       data: data.map(tx => ({
         cardId,
         merchant: tx.merchant,
         amount: tx.amount,
         date: tx.date,
       })),
+      skipDuplicates: true,
     });
+    return {
+      inserted: result.count,
+      skipped: Math.max(data.length - result.count, 0),
+    };
   },
 
   async getTransactions(userId: string) {

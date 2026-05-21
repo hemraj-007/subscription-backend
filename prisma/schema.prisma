@@ -71,6 +71,9 @@ model Transaction {
   card CreditCard @relation(fields: [cardId], references: [id])
 
   createdAt DateTime @default(now())
+
+  @@unique([cardId, merchant, amount, date])
+  @@index([cardId, merchant, date])
 }
 
 model Subscription {
@@ -95,6 +98,8 @@ model Subscription {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, merchant, amount])
+  @@index([status])
+  @@index([cardId, merchant])
 }
 
 model Alert {
@@ -109,4 +114,7 @@ model Alert {
   user User @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
+
+  @@index([userId, type, scheduledAt])
+  @@index([userId, type])
 }

@@ -11,42 +11,72 @@ export async function detectUnusedSubscriptions() {
     where: { status: SubscriptionStatus.ACTIVE },
   });
 
-  for (const sub of subscriptions) {
-    const lastTx = await prisma.transaction.findFirst({
-      where: {
-        cardId: sub.cardId,
-        merchant: sub.merchant,
-      },
-      orderBy: { date: "desc" },
-    });
+  if (subscriptions.length === 0) return;
 
-    if (!lastTx || lastTx.date < cutoff) {
-      // already marked at risk? skip
-      if (sub.status === SubscriptionStatus.AT_RISK) continue;
+  const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
+  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
 
-      await prisma.subscription.update({
-        where: { id: sub.id },
-        data: { status: SubscriptionStatus.AT_RISK },
-      });
+  const txGroups = await prisma.transaction.groupBy({
+    by: ["cardId", "merchant"],
+    where: {
+      cardId: { in: cardIds },
+      merchant: { in: merchants },
+    },
+    _max: { date: true },
+  });
 
-      const exists = await prisma.alert.findFirst({
-        where: {
-          userId: sub.userId,
-          type: "UNUSED",
-          message: `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`,
-        },
-      });
-
-      if (exists) continue;
-
-      await prisma.alert.create({
-        data: {
-          userId: sub.userId,
-          type: "UNUSED",
-          message: `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`,
-          scheduledAt: new Date(),
-        },
-      });
+  const lastTxByCardMerchant = new Map<string, Date>();
+  for (const row of txGroups) {
+    if (row._max.date) {
+      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
     }
+  }
+
+  const existingUnusedAlerts = await prisma.alert.findMany({
+    where: {
+      userId: { in: Array.from(new Set(subscriptions.map((sub) => sub.userId))) },
+      type: "UNUSED",
+    },
+    select: {
+      userId: true,
+      message: true,
+    },
+  });
+  const existingUnusedAlertKeys = new Set(
+    existingUnusedAlerts.map((a) => `${a.userId}:${a.message}`)
+  );
+
+  const atRiskIds: string[] = [];
+  const alertsToCreate: { userId: string; type: "UNUSED"; message: string; scheduledAt: Date }[] = [];
+
+  for (const sub of subscriptions) {
+    const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
+    if (!lastTxDate || lastTxDate < cutoff) {
+      atRiskIds.push(sub.id);
+      const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
+      const key = `${sub.userId}:${message}`;
+      if (!existingUnusedAlertKeys.has(key)) {
+        alertsToCreate.push({
+          userId: sub.userId,
+          type: "UNUSED",
+          message,
+          scheduledAt: new Date(),
+        });
+        existingUnusedAlertKeys.add(key);
+      }
+    }
+  }
+
+  if (atRiskIds.length > 0) {
+    await prisma.subscription.updateMany({
+      where: {
+        id: { in: atRiskIds },
+        status: SubscriptionStatus.ACTIVE,
+      },
+      data: { status: SubscriptionStatus.AT_RISK },
+    });
+  }
+  if (alertsToCreate.length > 0) {
+    await prisma.alert.createMany({ data: alertsToCreate });
   }
 }

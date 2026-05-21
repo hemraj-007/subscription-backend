@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { prisma } from "./config/prisma";
 import { env } from "./config/env";
 import { requestLogger } from "./middlewares/requestLogger.middleware";
 import routes from "./routes";
@@ -31,11 +30,6 @@ app.get("/health", (_, res) => {
   res.json({ status: "OK" });
 });
 
-app.get("/db-test", async (_, res) => {
-  await prisma.$connect();
-  res.json({ db: "connected" });
-});
-
 app.use("/api", routes);
 
 // 404 handler for unmatched routes
@@ -47,11 +41,22 @@ app.use((req, res) => {
   });
 });
 
-// Error handler middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  res.status(err.status || 500).json({
-    message: err.message || "Internal server error",
-    ...(process.env.NODE_ENV === "development" && { stack: err.stack })
+// Error handler middleware (handles multer upload errors with safe messages)
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ message: "Statement file is too large; maximum 5MB" });
+  }
+  if (err.code === "LIMIT_UNEXPECTED_FILE") {
+    return res.status(400).json({ message: "Unexpected file field; use field name 'file'" });
+  }
+  const status = err.status ?? err.statusCode ?? 500;
+  const message =
+    status >= 500
+      ? "Internal server error"
+      : (err.message || "Request failed");
+  res.status(status).json({
+    message,
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 });
 

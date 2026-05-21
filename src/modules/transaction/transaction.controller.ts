@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import { Response } from "express";
 import { transactionService } from "./transaction.service";
-import { parseCSV } from "./transaction.parser";
+import { parseStatement } from "./transaction.parser";
 import { cardService } from "../card/card.service";
 import { AuthRequest } from "../../middlewares/auth.middleware";
 
@@ -23,12 +23,7 @@ export const transactionController = {
         : Array.isArray(rawCardId) && rawCardId[0]
           ? String(rawCardId[0]).trim()
           : "";
-    const files: Express.Multer.File[] = Array.isArray(req.files)
-      ? req.files
-      : req.files
-        ? Object.values(req.files).flat()
-        : [];
-    const file = files.find((f) => f.fieldname === "file") ?? files[0];
+    const file = req.file;
 
     if (!file && !cardId) {
       return res.status(400).json({ message: "Missing file and cardId" });
@@ -47,9 +42,15 @@ export const transactionController = {
     }
 
     try {
-      const parsed = await parseCSV(file.path);
-      await transactionService.saveTransactions(cardId, parsed);
-      res.json({ imported: parsed.length });
+      const parsed = await parseStatement(file.path, file.originalname, file.mimetype);
+      const result = await transactionService.saveTransactions(cardId, parsed);
+      res.json({
+        imported: result.inserted,
+        duplicatesSkipped: result.skipped,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to parse statement";
+      return res.status(400).json({ message });
     } finally {
       await deleteUploadedFile(file.path);
     }

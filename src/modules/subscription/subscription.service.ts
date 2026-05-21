@@ -21,6 +21,7 @@ export const subscriptionService = {
         },
         update: {
           lastCharged,
+          nextCharge: new Date(lastCharged.getTime() + ONE_MONTH),
         },
         create: {
           userId,
@@ -42,7 +43,10 @@ export const subscriptionService = {
   async list(userId: string) {
     return prisma.subscription.findMany({
       where: { userId },
-      orderBy: { nextCharge: "asc" },
+      orderBy: [
+        { nextCharge: { sort: "asc", nulls: "last" } },
+        { lastCharged: "desc" },
+      ],
     });
   },
 };

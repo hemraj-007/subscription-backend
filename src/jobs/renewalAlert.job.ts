@@ -1,30 +1,55 @@
 import { prisma } from "../config/prisma";
 
-const ALERT_WINDOW_DAYS = 60;
-
 export async function generateRenewalAlerts() {
   const subscriptions = await prisma.subscription.findMany({
-    where: { status: "ACTIVE" },
+    where: {
+      status: "ACTIVE",
+      nextCharge: { not: null },
+    },
   });
 
-  for (const sub of subscriptions) {
-    const exists = await prisma.alert.findFirst({
-      where: {
-        userId: sub.userId,
-        type: "RENEWAL",
-        scheduledAt: sub.nextCharge!,
-      },
-    });
+  if (subscriptions.length === 0) return;
 
-    if (exists) continue; // 🚫 already created
+  const userIds = Array.from(new Set(subscriptions.map((sub) => sub.userId)));
+  const minScheduledAt = subscriptions.reduce(
+    (min, sub) => (sub.nextCharge! < min ? sub.nextCharge! : min),
+    subscriptions[0]!.nextCharge!
+  );
+  const maxScheduledAt = subscriptions.reduce(
+    (max, sub) => (sub.nextCharge! > max ? sub.nextCharge! : max),
+    subscriptions[0]!.nextCharge!
+  );
 
-    await prisma.alert.create({
-      data: {
-        userId: sub.userId,
-        type: "RENEWAL",
-        message: `${sub.merchant} will charge ₹${sub.amount} soon`,
-        scheduledAt: sub.nextCharge!,
+  const existingAlerts = await prisma.alert.findMany({
+    where: {
+      userId: { in: userIds },
+      type: "RENEWAL",
+      scheduledAt: {
+        gte: minScheduledAt,
+        lte: maxScheduledAt,
       },
-    });
-  }
+    },
+    select: {
+      userId: true,
+      scheduledAt: true,
+    },
+  });
+
+  const existingKeys = new Set(
+    existingAlerts.map((alert) => `${alert.userId}:${alert.scheduledAt.toISOString()}`)
+  );
+  const alertsToCreate = subscriptions
+    .filter((sub) => {
+      const key = `${sub.userId}:${sub.nextCharge!.toISOString()}`;
+      return !existingKeys.has(key);
+    })
+    .map((sub) => ({
+      userId: sub.userId,
+      type: "RENEWAL" as const,
+      message: `${sub.merchant} will charge ₹${sub.amount} soon`,
+      scheduledAt: sub.nextCharge!,
+    }));
+
+  if (alertsToCreate.length === 0) return;
+  await prisma.alert.createMany({ data: alertsToCreate });
 }
