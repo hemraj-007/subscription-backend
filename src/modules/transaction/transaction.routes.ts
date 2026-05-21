@@ -6,7 +6,13 @@ import { transactionController } from "./transaction.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
 
 const uploadDir = path.join(os.tmpdir(), "subscription-guardian-uploads");
-const upload = multer({ dest: uploadDir });
+const upload = multer({
+  dest: uploadDir,
+  limits: {
+    files: 1,
+    fileSize: 5 * 1024 * 1024,
+  },
+});
 const router = Router();
 
 router.post(
