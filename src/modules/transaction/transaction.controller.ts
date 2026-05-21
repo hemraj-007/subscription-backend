@@ -5,12 +5,16 @@ import { parseCSV } from "./transaction.parser";
 import { cardService } from "../card/card.service";
 import { AuthRequest } from "../../middlewares/auth.middleware";
 
-async function deleteUploadedFile(path: string) {
-  try {
-    await fs.unlink(path);
-  } catch {
-    // Ignore cleanup errors; avoid leaking paths in response
-  }
+async function deleteUploadedFiles(files: Express.Multer.File[]) {
+  await Promise.all(
+    files.map(async (file) => {
+      try {
+        await fs.unlink(file.path);
+      } catch {
+        // Ignore cleanup errors; avoid leaking paths in response.
+      }
+    })
+  );
 }
 
 export const transactionController = {
@@ -30,28 +34,27 @@ export const transactionController = {
         : [];
     const file = files.find((f) => f.fieldname === "file") ?? files[0];
 
-    if (!file && !cardId) {
-      return res.status(400).json({ message: "Missing file and cardId" });
-    }
-    if (!file) {
-      return res.status(400).json({ message: "Missing file" });
-    }
-    if (!cardId) {
-      return res.status(400).json({ message: "Missing cardId" });
-    }
-
-    const card = await cardService.getCardForUser(req.userId!, cardId);
-    if (!card) {
-      await deleteUploadedFile(file.path);
-      return res.status(404).json({ message: "Card not found" });
-    }
-
     try {
+      if (!file && !cardId) {
+        return res.status(400).json({ message: "Missing file and cardId" });
+      }
+      if (!file) {
+        return res.status(400).json({ message: "Missing file" });
+      }
+      if (!cardId) {
+        return res.status(400).json({ message: "Missing cardId" });
+      }
+
+      const card = await cardService.getCardForUser(req.userId!, cardId);
+      if (!card) {
+        return res.status(404).json({ message: "Card not found" });
+      }
+
       const parsed = await parseCSV(file.path);
       await transactionService.saveTransactions(cardId, parsed);
       res.json({ imported: parsed.length });
     } finally {
-      await deleteUploadedFile(file.path);
+      await deleteUploadedFiles(files);
     }
   },
 
