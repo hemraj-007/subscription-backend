@@ -10,5 +10,6 @@
     "skipLibCheck": true,
 
     "verbatimModuleSyntax": false
-  }
+  },
+  "include": ["src/**/*.ts"]
 }
