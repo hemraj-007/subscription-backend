@@ -1,5 +1,6 @@
 import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import { normalizeMerchant } from "../modules/subscription/merchant.normalizer";
 
 const INACTIVITY_DAYS = 30;
 
@@ -14,21 +15,29 @@ export async function detectUnusedSubscriptions() {
   if (subscriptions.length === 0) return;
 
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
-  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
+  const merchants = new Set(subscriptions.map((sub) => sub.merchant));
 
-  const txGroups = await prisma.transaction.groupBy({
-    by: ["cardId", "merchant"],
+  const recentTransactions = await prisma.transaction.findMany({
     where: {
       cardId: { in: cardIds },
-      merchant: { in: merchants },
+      date: { gte: cutoff },
     },
-    _max: { date: true },
+    select: {
+      cardId: true,
+      merchant: true,
+      date: true,
+    },
   });
 
   const lastTxByCardMerchant = new Map<string, Date>();
-  for (const row of txGroups) {
-    if (row._max.date) {
-      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
+  for (const tx of recentTransactions) {
+    const merchant = normalizeMerchant(tx.merchant);
+    if (!merchants.has(merchant)) continue;
+
+    const key = `${tx.cardId}:${merchant}`;
+    const previous = lastTxByCardMerchant.get(key);
+    if (!previous || tx.date > previous) {
+      lastTxByCardMerchant.set(key, tx.date);
     }
   }
 
