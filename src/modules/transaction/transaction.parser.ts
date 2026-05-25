@@ -32,6 +32,9 @@ const AMOUNT_COLUMN_ALIASES = [
   "balance",
 ];
 
+const DEBIT_COLUMN_ALIASES = ["debit", "debit amount"];
+const CREDIT_COLUMN_ALIASES = ["credit", "credit amount"];
+
 const DATE_COLUMN_ALIASES = [
   "date",
   "transaction date",
@@ -69,11 +72,29 @@ function parseDate(raw: unknown): Date {
   return d;
 }
 
+function resolveAmount(
+  row: Record<string, unknown>,
+  amountKey: string | undefined,
+  debitKey: string | undefined,
+  creditKey: string | undefined
+): number {
+  const debitAmount = debitKey ? parseAmount(row[debitKey]) : 0;
+  const creditAmount = creditKey ? parseAmount(row[creditKey]) : 0;
+
+  if (debitAmount > 0 || creditAmount > 0) {
+    return debitAmount > 0 ? debitAmount : creditAmount;
+  }
+
+  return parseAmount((amountKey ? row[amountKey] : undefined) ?? row.amount);
+}
+
 export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
   return new Promise((resolve, reject) => {
     const results: ParsedTransaction[] = [];
     let merchantKey: string | undefined;
     let amountKey: string | undefined;
+    let debitKey: string | undefined;
+    let creditKey: string | undefined;
     let dateKey: string | undefined;
 
     fs.createReadStream(filePath)
@@ -84,6 +105,8 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           const headers = Object.keys(row);
           merchantKey =
             findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ?? headers[0];
+          debitKey = findColumnKey(headers, DEBIT_COLUMN_ALIASES);
+          creditKey = findColumnKey(headers, CREDIT_COLUMN_ALIASES);
           amountKey =
             findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ?? headers.find((h) => h.toLowerCase().includes("amount")) ?? "amount";
           dateKey =
@@ -95,7 +118,7 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
         const dk = dateKey ?? "date";
         const rawMerchant = row[mk] ?? row.merchant ?? row.description ?? "";
         const merchant = String(rawMerchant ?? "").trim() || "Unknown";
-        const amount = parseAmount(row[ak] ?? row.amount);
+        const amount = resolveAmount(row, ak, debitKey, creditKey);
         const date = parseDate(row[dk] ?? row.date);
 
         if (!merchant || amount <= 0 || Number.isNaN(date.getTime())) return;
