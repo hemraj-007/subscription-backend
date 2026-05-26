@@ -31,24 +31,36 @@ export async function generateRenewalAlerts() {
     },
     select: {
       userId: true,
+      message: true,
       scheduledAt: true,
     },
   });
 
   const existingKeys = new Set(
-    existingAlerts.map((alert) => `${alert.userId}:${alert.scheduledAt.toISOString()}`)
+    existingAlerts.map(
+      (alert) => `${alert.userId}:${alert.scheduledAt.toISOString()}:${alert.message}`
+    )
   );
-  const alertsToCreate = subscriptions
-    .filter((sub) => {
-      const key = `${sub.userId}:${sub.nextCharge!.toISOString()}`;
-      return !existingKeys.has(key);
-    })
-    .map((sub) => ({
+  const alertsToCreate: {
+    userId: string;
+    type: "RENEWAL";
+    message: string;
+    scheduledAt: Date;
+  }[] = [];
+
+  for (const sub of subscriptions) {
+    const message = `${sub.merchant} will charge ₹${sub.amount} soon`;
+    const key = `${sub.userId}:${sub.nextCharge!.toISOString()}:${message}`;
+    if (existingKeys.has(key)) continue;
+
+    alertsToCreate.push({
       userId: sub.userId,
-      type: "RENEWAL" as const,
-      message: `${sub.merchant} will charge ₹${sub.amount} soon`,
+      type: "RENEWAL",
+      message,
       scheduledAt: sub.nextCharge!,
-    }));
+    });
+    existingKeys.add(key);
+  }
 
   if (alertsToCreate.length === 0) return;
   await prisma.alert.createMany({ data: alertsToCreate });
