@@ -5,6 +5,19 @@ import { env } from "../../config/env";
 
 const SALT_ROUNDS = 10;
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const emailEquals = (email: string) => ({
+  equals: email,
+  mode: "insensitive" as const,
+});
+
+async function findUsersByEmail(email: string) {
+  return prisma.user.findMany({
+    where: {
+      email: emailEquals(email),
+    },
+    orderBy: { createdAt: "asc" },
+  });
+}
 
 const signToken = (userId: string) => {
   return jwt.sign(
@@ -18,9 +31,7 @@ export const authService = {
   async signup(email: string, password: string) {
     const normalizedEmail = normalizeEmail(email);
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
+    const [existingUser] = await findUsersByEmail(normalizedEmail);
 
     if (existingUser) {
       throw new Error("User already exists");
@@ -43,19 +54,17 @@ export const authService = {
   async login(email: string, password: string) {
     const normalizedEmail = normalizeEmail(email);
 
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
+    const users = await findUsersByEmail(normalizedEmail);
+    let user: Awaited<ReturnType<typeof findUsersByEmail>>[number] | null = null;
 
-    if (!user) {
-      throw new Error("Invalid credentials");
+    for (const candidate of users) {
+      if (await bcrypt.compare(password, candidate.password)) {
+        user = candidate;
+        break;
+      }
     }
 
-    const isValid = await bcrypt.compare(password, user.password);
-
-    if (!isValid) {
-      throw new Error("Invalid credentials");
-    }
+    if (!user) throw new Error("Invalid credentials");
 
     const token = signToken(user.id);
 
