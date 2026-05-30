@@ -23,14 +23,12 @@ const MERCHANT_COLUMN_ALIASES = [
 
 const AMOUNT_COLUMN_ALIASES = [
   "amount",
-  "debit",
-  "credit",
   "transaction amount",
-  "debit amount",
-  "credit amount",
   "transaction amount (inr)",
-  "balance",
 ];
+
+const DEBIT_COLUMN_ALIASES = ["debit", "debit amount", "withdrawal", "withdrawal amount"];
+const CREDIT_COLUMN_ALIASES = ["credit", "credit amount", "deposit", "deposit amount"];
 
 const DATE_COLUMN_ALIASES = [
   "date",
@@ -69,11 +67,36 @@ function parseDate(raw: unknown): Date {
   return d;
 }
 
+function findAmountLikeColumn(headers: string[]): string | undefined {
+  return headers.find((h) => {
+    const normalized = h.toLowerCase();
+    return normalized.includes("amount") && !normalized.includes("balance");
+  });
+}
+
+function parseFirstPresentAmount(row: Record<string, unknown>, keys: Array<string | undefined>): number {
+  const seen = new Set<string>();
+  for (const key of keys) {
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+
+    const raw = row[key];
+    if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+
+    const amount = parseAmount(raw);
+    if (amount > 0) return amount;
+  }
+
+  return 0;
+}
+
 export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
   return new Promise((resolve, reject) => {
     const results: ParsedTransaction[] = [];
     let merchantKey: string | undefined;
     let amountKey: string | undefined;
+    let debitKey: string | undefined;
+    let creditKey: string | undefined;
     let dateKey: string | undefined;
 
     fs.createReadStream(filePath)
@@ -85,17 +108,18 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           merchantKey =
             findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ?? headers[0];
           amountKey =
-            findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ?? headers.find((h) => h.toLowerCase().includes("amount")) ?? "amount";
+            findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ?? findAmountLikeColumn(headers);
+          debitKey = findColumnKey(headers, DEBIT_COLUMN_ALIASES);
+          creditKey = findColumnKey(headers, CREDIT_COLUMN_ALIASES);
           dateKey =
             findColumnKey(headers, DATE_COLUMN_ALIASES) ?? headers.find((h) => h.toLowerCase().includes("date")) ?? "date";
         }
 
         const mk = merchantKey ?? "merchant";
-        const ak = amountKey ?? "amount";
         const dk = dateKey ?? "date";
         const rawMerchant = row[mk] ?? row.merchant ?? row.description ?? "";
         const merchant = String(rawMerchant ?? "").trim() || "Unknown";
-        const amount = parseAmount(row[ak] ?? row.amount);
+        const amount = parseFirstPresentAmount(row, [amountKey, "amount", debitKey, creditKey]);
         const date = parseDate(row[dk] ?? row.date);
 
         if (!merchant || amount <= 0 || Number.isNaN(date.getTime())) return;
