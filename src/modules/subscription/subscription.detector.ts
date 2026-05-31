@@ -1,5 +1,8 @@
 import { prisma } from "../../config/prisma";
-import { normalizeMerchant } from "./merchant.normalizer";
+import {
+  isLikelySubscriptionCharge,
+  normalizeMerchant,
+} from "./merchant.normalizer";
 
 export type TransactionGroup = {
   merchant: string;
@@ -32,8 +35,8 @@ function hasRecurrenceSignal(dates: Date[]): boolean {
 /**
  * Detects subscription-like charges from transactions (e.g. from real statements).
  * - Normalizes merchant names so "NETFLIX.COM 866..." and "Netflix" group together.
- * - Requires recurrence: same normalized merchant + same amount, at least MIN_RECURRING_COUNT times.
- * - Optionally requires roughly monthly spacing to avoid one-off repeat purchases.
+ * - Requires recurrence (2+ charges ~monthly apart), OR a single charge that
+ *   clearly looks like a subscription (known merchant / subscription keywords).
  */
 export async function detectSubscriptionGroups(userId: string) {
   const transactions = await prisma.transaction.findMany({
@@ -62,7 +65,11 @@ export async function detectSubscriptionGroups(userId: string) {
     map.get(key)!.dates.push(tx.date);
   }
 
-  return Array.from(map.values()).filter((group) =>
-    hasRecurrenceSignal(group.dates)
-  );
+  return Array.from(map.values()).filter((group) => {
+    if (hasRecurrenceSignal(group.dates)) return true;
+    const description = group.rawMerchant ?? group.merchant;
+    return (
+      group.dates.length >= 1 && isLikelySubscriptionCharge(description)
+    );
+  });
 }

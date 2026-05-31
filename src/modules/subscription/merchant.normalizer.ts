@@ -12,6 +12,7 @@ const KNOWN_MERCHANT_PATTERNS: Array<{ pattern: RegExp | string; name: string }>
   { pattern: /amazon\.?com|amazon\s+mkts|amazon\s+pay/i, name: "Amazon" },
   { pattern: /youtube\s*premium|youtube\s*music/i, name: "YouTube Premium" },
   { pattern: /apple\s*com|apple\.com|app\s*store|itunes/i, name: "Apple" },
+  { pattern: /icloud|apple\s*icloud/i, name: "Apple iCloud" },
   { pattern: /google\s*one|google\s*drive|google\s*storage|g\s*suite/i, name: "Google" },
   { pattern: /microsoft\s*365|office\s*365|xbox|msft\s*bill/i, name: "Microsoft" },
   { pattern: /adobe\.?com|adobe\s*creative|creative\s*cloud/i, name: "Adobe" },
@@ -56,4 +57,39 @@ export function normalizeMerchant(description: string): string {
   const first = cleaned.split(/\s/)[0] ?? cleaned;
   if (first.length <= 3 && first === first.toUpperCase()) return cleaned;
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
+}
+
+const NON_SUBSCRIPTION_PATTERNS = [
+  /mutual\s*fund|\bsip\b/i,
+  /electricity|internet\s*bill|water\s*bill/i,
+  /salary|freelance|dividend|atm|cash\s*withdrawal/i,
+  /swiggy|zomato|uber\s*ride|amazon\s*purchase/i,
+  /upi\s*transfer|opening balance|closing balance/i,
+];
+
+const SUBSCRIPTION_DESCRIPTION_KEYWORDS =
+  /\b(subscription|premium|membership)\b/i;
+
+/**
+ * True when a single statement line looks like a subscription charge
+ * (e.g. one month of Netflix on a bank export).
+ */
+export function isLikelySubscriptionCharge(description: string): boolean {
+  const raw = (description || "").trim();
+  if (!raw) return false;
+  if (NON_SUBSCRIPTION_PATTERNS.some((pattern) => pattern.test(raw))) {
+    return false;
+  }
+
+  for (const { pattern } of KNOWN_MERCHANT_PATTERNS) {
+    if (
+      typeof pattern === "string"
+        ? raw.toLowerCase().includes(pattern.toLowerCase())
+        : pattern.test(raw)
+    ) {
+      return true;
+    }
+  }
+
+  return SUBSCRIPTION_DESCRIPTION_KEYWORDS.test(raw);
 }
