@@ -67,12 +67,13 @@ model Transaction {
   amount    Float
   currency  String   @default("INR")
   date      DateTime
+  occurrence Int      @default(1)
 
   card CreditCard @relation(fields: [cardId], references: [id])
 
   createdAt DateTime @default(now())
 
-  @@unique([cardId, merchant, amount, date])
+  @@unique([cardId, merchant, amount, date, occurrence])
   @@index([cardId, merchant, date])
 }
 

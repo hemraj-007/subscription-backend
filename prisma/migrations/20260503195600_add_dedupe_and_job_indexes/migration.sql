@@ -1,11 +1,30 @@
 /*
   Warnings:
 
-  - A unique constraint covering the columns `[cardId,merchant,amount,date]` on the table `Transaction` will be added. If there are existing duplicate values, this will fail.
+  - Adds an occurrence ordinal so repeated imports can be deduped without
+    dropping distinct same-day transactions that share merchant, amount, and date.
 
 */
+-- AlterTable
+ALTER TABLE "Transaction" ADD COLUMN "occurrence" INTEGER NOT NULL DEFAULT 1;
+
+-- Backfill unique ordinals for any existing duplicates before adding the index.
+WITH ranked AS (
+  SELECT
+    "id",
+    ROW_NUMBER() OVER (
+      PARTITION BY "cardId", "merchant", "amount", "date"
+      ORDER BY "createdAt", "id"
+    ) AS rn
+  FROM "Transaction"
+)
+UPDATE "Transaction" AS t
+SET "occurrence" = ranked.rn
+FROM ranked
+WHERE t."id" = ranked."id";
+
 -- CreateIndex
-CREATE UNIQUE INDEX "Transaction_cardId_merchant_amount_date_key" ON "Transaction"("cardId", "merchant", "amount", "date");
+CREATE UNIQUE INDEX "Transaction_cardId_merchant_amount_date_occurrence_key" ON "Transaction"("cardId", "merchant", "amount", "date", "occurrence");
 
 -- CreateIndex
 CREATE INDEX "Transaction_cardId_merchant_date_idx" ON "Transaction"("cardId", "merchant", "date");
