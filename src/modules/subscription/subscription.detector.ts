@@ -36,7 +36,7 @@ function hasRecurrenceSignal(dates: Date[]): boolean {
  * Detects subscription-like charges from transactions (e.g. from real statements).
  * - Normalizes merchant names so "NETFLIX.COM 866..." and "Netflix" group together.
  * - Requires recurrence (2+ charges ~monthly apart), OR a single charge that
- *   clearly looks like a subscription (known merchant / subscription keywords).
+ *   clearly names a subscription product / subscription keyword.
  */
 export async function detectSubscriptionGroups(userId: string) {
   const transactions = await prisma.transaction.findMany({

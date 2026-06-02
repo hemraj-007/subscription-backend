@@ -70,9 +70,28 @@ const NON_SUBSCRIPTION_PATTERNS = [
 const SUBSCRIPTION_DESCRIPTION_KEYWORDS =
   /\b(subscription|premium|membership)\b/i;
 
+const SINGLE_CHARGE_SUBSCRIPTION_PATTERNS = [
+  /netflix/i,
+  /spotify/i,
+  /amazon\s*prime|prime\s*membership|prime\s*video/i,
+  /youtube\s*premium|youtube\s*music/i,
+  /icloud|apple\s*icloud/i,
+  /google\s*one|google\s*drive|google\s*storage|g\s*suite/i,
+  /microsoft\s*365|office\s*365|msft\s*bill/i,
+  /adobe\s*creative|creative\s*cloud/i,
+  /disney\s*plus|disneyplus|hotstar/i,
+  /hbo\s*max|max\s*streaming/i,
+  /dropbox/i,
+  /notion|notion\.so/i,
+  /slack/i,
+  /zoom\.us|zoom\s*video/i,
+  /linkedin\s*premium/i,
+];
+
 /**
  * True when a single statement line looks like a subscription charge
- * (e.g. one month of Netflix on a bank export).
+ * (e.g. one month of Netflix on a bank export). Broad marketplace
+ * merchants are intentionally excluded because they also sell one-off items.
  */
 export function isLikelySubscriptionCharge(description: string): boolean {
   const raw = (description || "").trim();
@@ -81,14 +100,8 @@ export function isLikelySubscriptionCharge(description: string): boolean {
     return false;
   }
 
-  for (const { pattern } of KNOWN_MERCHANT_PATTERNS) {
-    if (
-      typeof pattern === "string"
-        ? raw.toLowerCase().includes(pattern.toLowerCase())
-        : pattern.test(raw)
-    ) {
-      return true;
-    }
+  if (SINGLE_CHARGE_SUBSCRIPTION_PATTERNS.some((pattern) => pattern.test(raw))) {
+    return true;
   }
 
   return SUBSCRIPTION_DESCRIPTION_KEYWORDS.test(raw);
