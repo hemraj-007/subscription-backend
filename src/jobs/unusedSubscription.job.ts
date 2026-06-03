@@ -9,6 +9,25 @@ type TransactionMerchant = {
   merchant: string;
 };
 
+type ActiveSubscription = {
+  id: string;
+  userId: string;
+  cardId: string;
+  merchant: string;
+};
+
+type ExistingUnusedAlert = {
+  userId: string;
+  message: string;
+};
+
+type UnusedAlertCreate = {
+  userId: string;
+  type: "UNUSED";
+  message: string;
+  scheduledAt: Date;
+};
+
 export function buildNormalizedTransactionKeys(transactions: TransactionMerchant[]) {
   const keys = new Set<string>();
 
@@ -17,6 +36,41 @@ export function buildNormalizedTransactionKeys(transactions: TransactionMerchant
   }
 
   return keys;
+}
+
+export function collectUnusedSubscriptionChanges(
+  subscriptions: ActiveSubscription[],
+  recentTransactions: TransactionMerchant[],
+  existingUnusedAlerts: ExistingUnusedAlert[],
+  scheduledAt = new Date()
+) {
+  const recentTransactionKeys = buildNormalizedTransactionKeys(recentTransactions);
+  const existingUnusedAlertKeys = new Set(
+    existingUnusedAlerts.map((a) => `${a.userId}:${a.message}`)
+  );
+
+  const atRiskIds: string[] = [];
+  const alertsToCreate: UnusedAlertCreate[] = [];
+
+  for (const sub of subscriptions) {
+    const hasRecentCharge = recentTransactionKeys.has(`${sub.cardId}:${sub.merchant}`);
+    if (!hasRecentCharge) {
+      atRiskIds.push(sub.id);
+      const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
+      const key = `${sub.userId}:${message}`;
+      if (!existingUnusedAlertKeys.has(key)) {
+        alertsToCreate.push({
+          userId: sub.userId,
+          type: "UNUSED",
+          message,
+          scheduledAt,
+        });
+        existingUnusedAlertKeys.add(key);
+      }
+    }
+  }
+
+  return { atRiskIds, alertsToCreate };
 }
 
 export async function detectUnusedSubscriptions() {
@@ -42,8 +96,6 @@ export async function detectUnusedSubscriptions() {
     },
   });
 
-  const recentTransactionKeys = buildNormalizedTransactionKeys(recentTransactions);
-
   const existingUnusedAlerts = await prisma.alert.findMany({
     where: {
       userId: { in: Array.from(new Set(subscriptions.map((sub) => sub.userId))) },
@@ -54,30 +106,11 @@ export async function detectUnusedSubscriptions() {
       message: true,
     },
   });
-  const existingUnusedAlertKeys = new Set(
-    existingUnusedAlerts.map((a) => `${a.userId}:${a.message}`)
+  const { atRiskIds, alertsToCreate } = collectUnusedSubscriptionChanges(
+    subscriptions,
+    recentTransactions,
+    existingUnusedAlerts
   );
-
-  const atRiskIds: string[] = [];
-  const alertsToCreate: { userId: string; type: "UNUSED"; message: string; scheduledAt: Date }[] = [];
-
-  for (const sub of subscriptions) {
-    const hasRecentCharge = recentTransactionKeys.has(`${sub.cardId}:${sub.merchant}`);
-    if (!hasRecentCharge) {
-      atRiskIds.push(sub.id);
-      const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
-      const key = `${sub.userId}:${message}`;
-      if (!existingUnusedAlertKeys.has(key)) {
-        alertsToCreate.push({
-          userId: sub.userId,
-          type: "UNUSED",
-          message,
-          scheduledAt: new Date(),
-        });
-        existingUnusedAlertKeys.add(key);
-      }
-    }
-  }
 
   if (atRiskIds.length > 0) {
     await prisma.subscription.updateMany({
