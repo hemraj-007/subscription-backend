@@ -137,7 +137,8 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
             findColumnKey(headers, DEBIT_COLUMN_ALIASES),
             findColumnKey(headers, CREDIT_COLUMN_ALIASES),
           ].filter(
-            (key): key is string => Boolean(key) && !isBalanceColumn(key)
+            (key): key is string =>
+              typeof key === "string" && !isBalanceColumn(key)
           );
           amountKeys = Array.from(new Set(amountCandidates));
           dateKey =
