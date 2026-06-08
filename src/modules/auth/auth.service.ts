@@ -6,6 +6,11 @@ import { env } from "../../config/env";
 const SALT_ROUNDS = 10;
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+const emailLookup = (email: string) => ({
+  equals: normalizeEmail(email),
+  mode: "insensitive" as const,
+});
+
 const signToken = (userId: string) => {
   return jwt.sign(
     { userId },
@@ -18,8 +23,9 @@ export const authService = {
   async signup(email: string, password: string) {
     const normalizedEmail = normalizeEmail(email);
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
+    const existingUser = await prisma.user.findFirst({
+      where: { email: emailLookup(normalizedEmail) },
+      select: { id: true },
     });
 
     if (existingUser) {
@@ -43,24 +49,32 @@ export const authService = {
   async login(email: string, password: string) {
     const normalizedEmail = normalizeEmail(email);
 
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
+    const users = await prisma.user.findMany({
+      where: { email: emailLookup(normalizedEmail) },
+      orderBy: { createdAt: "asc" },
     });
 
-    if (!user) {
+    if (users.length === 0) {
       throw new Error("Invalid credentials");
     }
 
-    const isValid = await bcrypt.compare(password, user.password);
+    let matchingUser: (typeof users)[number] | undefined;
+    for (const user of users) {
+      const isValid = await bcrypt.compare(password, user.password);
+      if (isValid) {
+        matchingUser = user;
+        break;
+      }
+    }
 
-    if (!isValid) {
+    if (!matchingUser) {
       throw new Error("Invalid credentials");
     }
 
-    const token = signToken(user.id);
+    const token = signToken(matchingUser.id);
 
     // ✅ remove password before returning
-    const { password: _, ...safeUser } = user;
+    const { password: _, ...safeUser } = matchingUser;
 
     return { user: safeUser, token };
   },

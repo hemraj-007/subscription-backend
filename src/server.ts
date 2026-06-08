@@ -46,7 +46,7 @@ async function start() {
       }
     });
   } else {
-    console.log("Scheduler disabled (set RUN_SCHEDULER=true to enable jobs).");
+    console.log("Scheduler disabled by RUN_SCHEDULER=false.");
   }
 
   const server = app.listen(env.PORT, () => {

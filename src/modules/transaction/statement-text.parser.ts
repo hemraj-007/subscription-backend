@@ -362,18 +362,30 @@ function parseFromLines(lines: string[]): ParsedTransaction[] {
   return results;
 }
 
-function dedupeTransactions(transactions: ParsedTransaction[]): ParsedTransaction[] {
-  const seen = new Set<string>();
-  const unique: ParsedTransaction[] = [];
+function transactionKey(tx: ParsedTransaction): string {
+  return `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}`;
+}
 
-  for (const tx of transactions) {
-    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(tx);
+function mergeTransactionSources(...sources: ParsedTransaction[][]): ParsedTransaction[] {
+  const merged: ParsedTransaction[] = [];
+  const mergedCounts = new Map<string, number>();
+
+  for (const source of sources) {
+    const sourceCounts = new Map<string, number>();
+    for (const tx of source) {
+      const key = transactionKey(tx);
+      const sourceCount = (sourceCounts.get(key) ?? 0) + 1;
+      sourceCounts.set(key, sourceCount);
+
+      const mergedCount = mergedCounts.get(key) ?? 0;
+      if (sourceCount > mergedCount) {
+        merged.push(tx);
+        mergedCounts.set(key, sourceCount);
+      }
+    }
   }
 
-  return unique;
+  return merged;
 }
 
 export function parseTransactionsFromPdfContent(
@@ -382,7 +394,7 @@ export function parseTransactionsFromPdfContent(
 ): ParsedTransaction[] {
   const fromCompact = parseFromCompactTableRows(rows);
   if (fromCompact.length > 0) {
-    return dedupeTransactions(fromCompact);
+    return fromCompact;
   }
 
   const fromTable = parseFromTableRows(rows);
@@ -392,9 +404,9 @@ export function parseTransactionsFromPdfContent(
       : text.split(/\r?\n/);
 
   const fromLines = parseFromLines(lineSource);
-  const merged = dedupeTransactions([...fromTable, ...fromLines]);
+  const merged = mergeTransactionSources(fromTable, fromLines);
 
   if (merged.length > 0) return merged;
 
-  return dedupeTransactions(parseFromLines(text.split(/\r?\n/)));
+  return parseFromLines(text.split(/\r?\n/));
 }

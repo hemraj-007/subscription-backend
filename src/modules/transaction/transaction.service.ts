@@ -10,11 +10,10 @@ export const transactionService = {
         amount: tx.amount,
         date: tx.date,
       })),
-      skipDuplicates: true,
     });
     return {
       inserted: result.count,
-      skipped: Math.max(data.length - result.count, 0),
+      skipped: 0,
     };
   },
 
