@@ -54,23 +54,31 @@ test("PDF table parsing preserves legitimate duplicate-looking statement rows", 
 });
 
 test("transaction save path does not skip duplicate-looking rows", async (t) => {
-  const createMany = t.mock.method(prisma.transaction, "createMany", async (args: any) => {
-    assert.equal("skipDuplicates" in args, false);
-    assert.deepEqual(args.data, [
-      {
-        cardId: "card-1",
-        merchant: "Coffee Shop",
-        amount: 5,
-        date: new Date("2026-01-01T00:00:00Z"),
-      },
-      {
-        cardId: "card-1",
-        merchant: "Coffee Shop",
-        amount: 5,
-        date: new Date("2026-01-01T00:00:00Z"),
-      },
-    ]);
-    return { count: 2 };
+  const originalTransactionDelegate = prisma.transaction;
+  let createManyCalls = 0;
+  (prisma as any).transaction = {
+    createMany: async (args: any) => {
+      createManyCalls += 1;
+      assert.equal("skipDuplicates" in args, false);
+      assert.deepEqual(args.data, [
+        {
+          cardId: "card-1",
+          merchant: "Coffee Shop",
+          amount: 5,
+          date: new Date("2026-01-01T00:00:00Z"),
+        },
+        {
+          cardId: "card-1",
+          merchant: "Coffee Shop",
+          amount: 5,
+          date: new Date("2026-01-01T00:00:00Z"),
+        },
+      ]);
+      return { count: 2 };
+    },
+  };
+  t.after(() => {
+    (prisma as any).transaction = originalTransactionDelegate;
   });
 
   const result = await transactionService.saveTransactions("card-1", [
@@ -86,6 +94,6 @@ test("transaction save path does not skip duplicate-looking rows", async (t) => 
     },
   ]);
 
-  assert.equal(createMany.mock.calls.length, 1);
+  assert.equal(createManyCalls, 1);
   assert.deepEqual(result, { inserted: 2, skipped: 0 });
 });

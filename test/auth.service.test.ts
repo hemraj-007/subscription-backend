@@ -29,17 +29,25 @@ test("login accepts a legacy mixed-case stored email", async (t) => {
     updatedAt: new Date("2026-01-01T00:00:00Z"),
   };
 
-  const findMany = t.mock.method(prisma.user, "findMany", async (args: any) => {
-    assert.deepEqual(args.where, {
-      email: { equals: "alice@example.com", mode: "insensitive" },
-    });
-    assert.deepEqual(args.orderBy, { createdAt: "asc" });
-    return [legacyUser];
+  const originalUserDelegate = prisma.user;
+  let findManyCalls = 0;
+  (prisma as any).user = {
+    findMany: async (args: any) => {
+      findManyCalls += 1;
+      assert.deepEqual(args.where, {
+        email: { equals: "alice@example.com", mode: "insensitive" },
+      });
+      assert.deepEqual(args.orderBy, { createdAt: "asc" });
+      return [legacyUser];
+    },
+  };
+  t.after(() => {
+    (prisma as any).user = originalUserDelegate;
   });
 
   const result = await authService.login(" alice@example.com ", "correct-password");
 
-  assert.equal(findMany.mock.calls.length, 1);
+  assert.equal(findManyCalls, 1);
   assert.equal(result.user.id, "user-1");
   assert.equal(result.user.email, "Alice@Example.com");
   assert.equal("password" in result.user, false);
@@ -47,17 +55,25 @@ test("login accepts a legacy mixed-case stored email", async (t) => {
 });
 
 test("signup blocks duplicate emails regardless of case", async (t) => {
-  const findFirst = t.mock.method(prisma.user, "findFirst", async (args: any) => {
-    assert.deepEqual(args.where, {
-      email: { equals: "alice@example.com", mode: "insensitive" },
-    });
-    assert.deepEqual(args.select, { id: true });
-    return { id: "existing-user" };
+  const originalUserDelegate = prisma.user;
+  let findFirstCalls = 0;
+  (prisma as any).user = {
+    findFirst: async (args: any) => {
+      findFirstCalls += 1;
+      assert.deepEqual(args.where, {
+        email: { equals: "alice@example.com", mode: "insensitive" },
+      });
+      assert.deepEqual(args.select, { id: true });
+      return { id: "existing-user" };
+    },
+  };
+  t.after(() => {
+    (prisma as any).user = originalUserDelegate;
   });
 
   await assert.rejects(
     () => authService.signup("ALICE@example.com", "password"),
     /User already exists/
   );
-  assert.equal(findFirst.mock.calls.length, 1);
+  assert.equal(findFirstCalls, 1);
 });
