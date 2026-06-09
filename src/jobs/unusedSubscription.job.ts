@@ -1,7 +1,32 @@
 import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import { normalizeMerchant } from "../modules/subscription/merchant.normalizer";
 
 const INACTIVITY_DAYS = 30;
+
+type TransactionActivity = {
+  cardId: string;
+  merchant: string;
+  date: Date;
+};
+
+export function subscriptionActivityKey(cardId: string, merchant: string) {
+  return `${cardId}:${normalizeMerchant(merchant)}`;
+}
+
+export function buildLastTxByCardMerchant(transactions: TransactionActivity[]) {
+  const lastTxByCardMerchant = new Map<string, Date>();
+
+  for (const tx of transactions) {
+    const key = subscriptionActivityKey(tx.cardId, tx.merchant);
+    const previous = lastTxByCardMerchant.get(key);
+    if (!previous || tx.date > previous) {
+      lastTxByCardMerchant.set(key, tx.date);
+    }
+  }
+
+  return lastTxByCardMerchant;
+}
 
 export async function detectUnusedSubscriptions() {
   const cutoff = new Date();
@@ -14,23 +39,20 @@ export async function detectUnusedSubscriptions() {
   if (subscriptions.length === 0) return;
 
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
-  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
 
-  const txGroups = await prisma.transaction.groupBy({
-    by: ["cardId", "merchant"],
+  const recentTransactions = await prisma.transaction.findMany({
     where: {
       cardId: { in: cardIds },
-      merchant: { in: merchants },
+      date: { gte: cutoff },
     },
-    _max: { date: true },
+    select: {
+      cardId: true,
+      merchant: true,
+      date: true,
+    },
   });
 
-  const lastTxByCardMerchant = new Map<string, Date>();
-  for (const row of txGroups) {
-    if (row._max.date) {
-      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
-    }
-  }
+  const lastTxByCardMerchant = buildLastTxByCardMerchant(recentTransactions);
 
   const existingUnusedAlerts = await prisma.alert.findMany({
     where: {
@@ -50,7 +72,7 @@ export async function detectUnusedSubscriptions() {
   const alertsToCreate: { userId: string; type: "UNUSED"; message: string; scheduledAt: Date }[] = [];
 
   for (const sub of subscriptions) {
-    const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
+    const lastTxDate = lastTxByCardMerchant.get(subscriptionActivityKey(sub.cardId, sub.merchant));
     if (!lastTxDate || lastTxDate < cutoff) {
       atRiskIds.push(sub.id);
       const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;

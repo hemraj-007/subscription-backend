@@ -97,7 +97,7 @@ model Subscription {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, merchant, amount])
+  @@unique([userId, cardId, merchant, amount])
   @@index([status])
   @@index([cardId, merchant])
 }
