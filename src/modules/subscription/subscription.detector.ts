@@ -20,6 +20,13 @@ const MIN_RECURRING_COUNT = 2;
 const MIN_DAYS_BETWEEN = 20;
 const MAX_DAYS_BETWEEN = 45;
 
+type DetectableTransaction = {
+  cardId: string;
+  merchant: string;
+  amount: number;
+  date: Date;
+};
+
 function hasRecurrenceSignal(dates: Date[]): boolean {
   if (dates.length < MIN_RECURRING_COUNT) return false;
   const sorted = [...dates].map((d) => d.getTime()).sort((a, b) => a - b);
@@ -32,25 +39,14 @@ function hasRecurrenceSignal(dates: Date[]): boolean {
   return dates.length >= 3;
 }
 
-/**
- * Detects subscription-like charges from transactions (e.g. from real statements).
- * - Normalizes merchant names so "NETFLIX.COM 866..." and "Netflix" group together.
- * - Requires recurrence (2+ charges ~monthly apart), OR a single charge that
- *   clearly looks like a subscription (known merchant / subscription keywords).
- */
-export async function detectSubscriptionGroups(userId: string) {
-  const transactions = await prisma.transaction.findMany({
-    where: {
-      card: { userId },
-    },
-    orderBy: { date: "asc" },
-  });
-
+export function groupSubscriptionTransactions(
+  transactions: DetectableTransaction[]
+): TransactionGroup[] {
   const map = new Map<string, TransactionGroup>();
 
   for (const tx of transactions) {
     const normalized = normalizeMerchant(tx.merchant);
-    const key = `${normalized}-${tx.amount}`;
+    const key = `${tx.cardId}:${normalized}:${tx.amount}`;
 
     if (!map.has(key)) {
       map.set(key, {
@@ -72,4 +68,22 @@ export async function detectSubscriptionGroups(userId: string) {
       group.dates.length >= 1 && isLikelySubscriptionCharge(description)
     );
   });
+}
+
+/**
+ * Detects subscription-like charges from transactions (e.g. from real statements).
+ * - Normalizes merchant names so "NETFLIX.COM 866..." and "Netflix" group together.
+ * - Keeps cards separate so the same merchant/amount on two cards creates two subscriptions.
+ * - Requires recurrence (2+ charges ~monthly apart), OR a single charge that
+ *   clearly looks like a subscription (known merchant / subscription keywords).
+ */
+export async function detectSubscriptionGroups(userId: string) {
+  const transactions = await prisma.transaction.findMany({
+    where: {
+      card: { userId },
+    },
+    orderBy: { date: "asc" },
+  });
+
+  return groupSubscriptionTransactions(transactions);
 }

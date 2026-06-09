@@ -1,3 +1,4 @@
+import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { detectSubscriptionGroups } from "./subscription.detector";
 
@@ -13,8 +14,9 @@ export const subscriptionService = {
 
       const subscription = await prisma.subscription.upsert({
         where: {
-          userId_merchant_amount: {
+          userId_cardId_merchant_amount: {
             userId,
+            cardId: group.cardId,
             merchant: group.merchant,
             amount: group.amount,
           },
@@ -34,7 +36,15 @@ export const subscriptionService = {
         },
       });
 
-      created.push(subscription);
+      if (subscription.status === SubscriptionStatus.AT_RISK) {
+        const reactivated = await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: { status: SubscriptionStatus.ACTIVE },
+        });
+        created.push(reactivated);
+      } else {
+        created.push(subscription);
+      }
     }
 
     return created;
