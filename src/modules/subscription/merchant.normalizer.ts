@@ -4,29 +4,45 @@
  * Real statements use varying formats; this improves subscription detection.
  */
 
-// Known subscription merchants: description pattern (case-insensitive) → display name
-const KNOWN_MERCHANT_PATTERNS: Array<{ pattern: RegExp | string; name: string }> = [
-  { pattern: /netflix/i, name: "Netflix" },
-  { pattern: /spotify/i, name: "Spotify" },
-  { pattern: /amazon\s*prime|prime\s*membership|prime\s*video/i, name: "Amazon Prime" },
+type MerchantPattern = {
+  pattern: RegExp | string;
+  name: string;
+  singleChargeLikely?: boolean;
+};
+
+// Known merchants: description pattern (case-insensitive) → display name.
+// Broad retailer patterns are useful for recurrence grouping but are not enough
+// to classify a single transaction as a subscription.
+const KNOWN_MERCHANT_PATTERNS: MerchantPattern[] = [
+  { pattern: /netflix/i, name: "Netflix", singleChargeLikely: true },
+  { pattern: /spotify/i, name: "Spotify", singleChargeLikely: true },
+  { pattern: /amazon\s*prime|prime\s*membership|prime\s*video/i, name: "Amazon Prime", singleChargeLikely: true },
   { pattern: /amazon\.?com|amazon\s+mkts|amazon\s+pay/i, name: "Amazon" },
-  { pattern: /youtube\s*premium|youtube\s*music/i, name: "YouTube Premium" },
+  { pattern: /youtube\s*premium|youtube\s*music/i, name: "YouTube Premium", singleChargeLikely: true },
+  { pattern: /icloud|apple\s*icloud/i, name: "Apple iCloud", singleChargeLikely: true },
   { pattern: /apple\s*com|apple\.com|app\s*store|itunes/i, name: "Apple" },
-  { pattern: /icloud|apple\s*icloud/i, name: "Apple iCloud" },
-  { pattern: /google\s*one|google\s*drive|google\s*storage|g\s*suite/i, name: "Google" },
-  { pattern: /microsoft\s*365|office\s*365|xbox|msft\s*bill/i, name: "Microsoft" },
-  { pattern: /adobe\.?com|adobe\s*creative|creative\s*cloud/i, name: "Adobe" },
+  { pattern: /google\s*one|google\s*drive|google\s*storage|g\s*suite/i, name: "Google", singleChargeLikely: true },
+  { pattern: /microsoft\s*365|office\s*365/i, name: "Microsoft", singleChargeLikely: true },
+  { pattern: /xbox|msft\s*bill/i, name: "Microsoft" },
+  { pattern: /adobe\.?com|adobe\s*creative|creative\s*cloud/i, name: "Adobe", singleChargeLikely: true },
   { pattern: /steam|steampowered/i, name: "Steam" },
-  { pattern: /disney\s*plus|disneyplus|hotstar/i, name: "Disney+" },
-  { pattern: /hbo\s*max|max\s*streaming/i, name: "Max" },
-  { pattern: /dropbox/i, name: "Dropbox" },
-  { pattern: /notion|notion\.so/i, name: "Notion" },
-  { pattern: /slack/i, name: "Slack" },
-  { pattern: /zoom\.us|zoom\s*video/i, name: "Zoom" },
-  { pattern: /linkedin\s*premium|linkedin\.com/i, name: "LinkedIn" },
+  { pattern: /disney\s*plus|disneyplus|hotstar/i, name: "Disney+", singleChargeLikely: true },
+  { pattern: /hbo\s*max|max\s*streaming/i, name: "Max", singleChargeLikely: true },
+  { pattern: /dropbox/i, name: "Dropbox", singleChargeLikely: true },
+  { pattern: /notion|notion\.so/i, name: "Notion", singleChargeLikely: true },
+  { pattern: /slack/i, name: "Slack", singleChargeLikely: true },
+  { pattern: /zoom\.us|zoom\s*video/i, name: "Zoom", singleChargeLikely: true },
+  { pattern: /linkedin\s*premium/i, name: "LinkedIn", singleChargeLikely: true },
+  { pattern: /linkedin\.com/i, name: "LinkedIn" },
   { pattern: /canva/i, name: "Canva" },
   { pattern: /flipkart/i, name: "Flipkart" },
 ];
+
+function matchesPattern(pattern: RegExp | string, raw: string): boolean {
+  return typeof pattern === "string"
+    ? raw.toLowerCase().includes(pattern.toLowerCase())
+    : pattern.test(raw);
+}
 
 /**
  * Normalize a raw transaction description to a stable name for grouping.
@@ -38,7 +54,7 @@ export function normalizeMerchant(description: string): string {
   if (!raw) return "Unknown";
 
   for (const { pattern, name } of KNOWN_MERCHANT_PATTERNS) {
-    if (typeof pattern === "string" ? raw.toLowerCase().includes(pattern.toLowerCase()) : pattern.test(raw)) {
+    if (matchesPattern(pattern, raw)) {
       return name;
     }
   }
@@ -81,12 +97,8 @@ export function isLikelySubscriptionCharge(description: string): boolean {
     return false;
   }
 
-  for (const { pattern } of KNOWN_MERCHANT_PATTERNS) {
-    if (
-      typeof pattern === "string"
-        ? raw.toLowerCase().includes(pattern.toLowerCase())
-        : pattern.test(raw)
-    ) {
+  for (const { pattern, singleChargeLikely } of KNOWN_MERCHANT_PATTERNS) {
+    if (singleChargeLikely && matchesPattern(pattern, raw)) {
       return true;
     }
   }
