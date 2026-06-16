@@ -1,7 +1,12 @@
 import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import { normalizeMerchant } from "../modules/subscription/merchant.normalizer";
 
 const INACTIVITY_DAYS = 30;
+
+function cardMerchantKey(cardId: string, merchant: string): string {
+  return `${cardId}:${normalizeMerchant(merchant)}`;
+}
 
 export async function detectUnusedSubscriptions() {
   const cutoff = new Date();
@@ -14,23 +19,21 @@ export async function detectUnusedSubscriptions() {
   if (subscriptions.length === 0) return;
 
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
-  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
 
-  const txGroups = await prisma.transaction.groupBy({
-    by: ["cardId", "merchant"],
+  const recentTransactions = await prisma.transaction.findMany({
     where: {
       cardId: { in: cardIds },
-      merchant: { in: merchants },
+      date: { gte: cutoff },
     },
-    _max: { date: true },
+    select: {
+      cardId: true,
+      merchant: true,
+    },
   });
 
-  const lastTxByCardMerchant = new Map<string, Date>();
-  for (const row of txGroups) {
-    if (row._max.date) {
-      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
-    }
-  }
+  const recentlyUsedCardMerchants = new Set(
+    recentTransactions.map((tx) => cardMerchantKey(tx.cardId, tx.merchant))
+  );
 
   const existingUnusedAlerts = await prisma.alert.findMany({
     where: {
@@ -50,8 +53,7 @@ export async function detectUnusedSubscriptions() {
   const alertsToCreate: { userId: string; type: "UNUSED"; message: string; scheduledAt: Date }[] = [];
 
   for (const sub of subscriptions) {
-    const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
-    if (!lastTxDate || lastTxDate < cutoff) {
+    if (!recentlyUsedCardMerchants.has(cardMerchantKey(sub.cardId, sub.merchant))) {
       atRiskIds.push(sub.id);
       const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
       const key = `${sub.userId}:${message}`;

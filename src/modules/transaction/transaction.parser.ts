@@ -29,7 +29,12 @@ const AMOUNT_COLUMN_ALIASES = [
   "debit amount",
   "credit amount",
   "transaction amount (inr)",
-  "balance",
+  "withdrawal",
+  "withdrawals",
+  "deposit",
+  "deposits",
+  "paid out",
+  "paid in",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -53,6 +58,11 @@ function findColumnKey(
     if (normalized.has(alias)) return normalized.get(alias);
   }
   return undefined;
+}
+
+function isBalanceColumn(header: string): boolean {
+  const normalized = header.toLowerCase().trim();
+  return /\bbalance\b/.test(normalized);
 }
 
 function parseAmount(raw: unknown): number {
@@ -85,7 +95,9 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           merchantKey =
             findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ?? headers[0];
           amountKey =
-            findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ?? headers.find((h) => h.toLowerCase().includes("amount")) ?? "amount";
+            findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ??
+            headers.find((h) => h.toLowerCase().includes("amount") && !isBalanceColumn(h)) ??
+            "amount";
           dateKey =
             findColumnKey(headers, DATE_COLUMN_ALIASES) ?? headers.find((h) => h.toLowerCase().includes("date")) ?? "date";
         }
