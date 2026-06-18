@@ -1,7 +1,19 @@
 import { prisma } from "../../config/prisma";
+import { SubscriptionStatus } from "@prisma/client";
 import { detectSubscriptionGroups } from "./subscription.detector";
 
 const ONE_MONTH = 30 * 24 * 60 * 60 * 1000;
+
+export function shouldReactivateSubscription(
+  status: SubscriptionStatus,
+  lastCharged: Date,
+  now = new Date()
+) {
+  return (
+    status === SubscriptionStatus.AT_RISK &&
+    lastCharged.getTime() >= now.getTime() - ONE_MONTH
+  );
+}
 
 export const subscriptionService = {
   async detectAndSave(userId: string) {
@@ -33,6 +45,16 @@ export const subscriptionService = {
           nextCharge: new Date(lastCharged.getTime() + ONE_MONTH),
         },
       });
+
+      if (shouldReactivateSubscription(subscription.status, lastCharged)) {
+        created.push(
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { status: SubscriptionStatus.ACTIVE },
+          })
+        );
+        continue;
+      }
 
       created.push(subscription);
     }
