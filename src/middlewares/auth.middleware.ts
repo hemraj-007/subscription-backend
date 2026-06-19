@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import jwt, { JwtPayload } from "jsonwebtoken";
 import { env } from "../config/env";
 
 export interface AuthRequest extends Request {
@@ -20,7 +20,15 @@ export const authMiddleware = (
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as { userId: string };
+    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload | string;
+    if (
+      typeof decoded !== "object" ||
+      typeof decoded.userId !== "string" ||
+      decoded.userId.trim() === ""
+    ) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+
     req.userId = decoded.userId;
     next();
   } catch {

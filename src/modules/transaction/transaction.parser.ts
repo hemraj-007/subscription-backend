@@ -29,7 +29,6 @@ const AMOUNT_COLUMN_ALIASES = [
   "debit amount",
   "credit amount",
   "transaction amount (inr)",
-  "balance",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -65,8 +64,28 @@ function parseAmount(raw: unknown): number {
 
 function parseDate(raw: unknown): Date {
   if (raw === undefined || raw === null || raw === "") return new Date(NaN);
-  const d = new Date(String(raw).trim());
-  return d;
+  const value = String(raw).trim();
+  const delimited = value.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);
+  if (delimited) {
+    const first = Number(delimited[1]);
+    const second = Number(delimited[2]);
+    const yearPart = Number(delimited[3]);
+    const year = yearPart < 100 ? 2000 + yearPart : yearPart;
+    const usesMonthFirst = second > 12;
+    const day = usesMonthFirst ? second : first;
+    const month = usesMonthFirst ? first : second;
+    const parsed = new Date(year, month - 1, day);
+    if (
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return parsed;
+    }
+    return new Date(NaN);
+  }
+
+  return new Date(value);
 }
 
 export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
@@ -132,7 +151,15 @@ export async function parseStatement(
   const ext = path.extname(originalName || "").toLowerCase();
   const isPdfMime = mimeType === "application/pdf";
 
-  if (ext === ".csv") return parseCSV(filePath);
+  if (ext === ".csv") {
+    const transactions = await parseCSV(filePath);
+    if (transactions.length === 0) {
+      throw new Error(
+        "No transactions found in CSV. Check that the file includes date, merchant, and amount columns."
+      );
+    }
+    return transactions;
+  }
   if (ext === ".pdf" || isPdfMime) return parsePDF(filePath);
 
   throw new Error("Unsupported statement format. Please upload CSV or PDF.");

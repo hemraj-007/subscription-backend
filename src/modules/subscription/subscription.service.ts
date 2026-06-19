@@ -1,3 +1,4 @@
+import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { detectSubscriptionGroups } from "./subscription.detector";
 
@@ -22,6 +23,7 @@ export const subscriptionService = {
         update: {
           lastCharged,
           nextCharge: new Date(lastCharged.getTime() + ONE_MONTH),
+          status: SubscriptionStatus.ACTIVE,
         },
         create: {
           userId,
