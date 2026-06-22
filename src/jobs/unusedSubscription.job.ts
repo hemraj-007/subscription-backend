@@ -1,7 +1,34 @@
 import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import { normalizeMerchant } from "../modules/subscription/merchant.normalizer";
 
 const INACTIVITY_DAYS = 30;
+
+type TransactionMerchantMax = {
+  cardId: string;
+  merchant: string;
+  _max: {
+    date: Date | null;
+  };
+};
+
+export function buildLastTransactionDateBySubscriptionMerchant(
+  txGroups: TransactionMerchantMax[]
+) {
+  const lastTxByCardMerchant = new Map<string, Date>();
+
+  for (const row of txGroups) {
+    if (!row._max.date) continue;
+
+    const key = `${row.cardId}:${normalizeMerchant(row.merchant)}`;
+    const currentLastTxDate = lastTxByCardMerchant.get(key);
+    if (!currentLastTxDate || row._max.date > currentLastTxDate) {
+      lastTxByCardMerchant.set(key, row._max.date);
+    }
+  }
+
+  return lastTxByCardMerchant;
+}
 
 export async function detectUnusedSubscriptions() {
   const cutoff = new Date();
@@ -14,23 +41,17 @@ export async function detectUnusedSubscriptions() {
   if (subscriptions.length === 0) return;
 
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
-  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
 
   const txGroups = await prisma.transaction.groupBy({
     by: ["cardId", "merchant"],
     where: {
       cardId: { in: cardIds },
-      merchant: { in: merchants },
     },
     _max: { date: true },
   });
 
-  const lastTxByCardMerchant = new Map<string, Date>();
-  for (const row of txGroups) {
-    if (row._max.date) {
-      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
-    }
-  }
+  const lastTxByCardMerchant =
+    buildLastTransactionDateBySubscriptionMerchant(txGroups);
 
   const existingUnusedAlerts = await prisma.alert.findMany({
     where: {
