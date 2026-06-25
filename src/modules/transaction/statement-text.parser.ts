@@ -4,10 +4,12 @@ import { ParsedTransaction } from "./transaction.types";
 const DATE_PATTERN =
   /(\d{1,2}[\s./-](?:\d{1,2}|[A-Za-z]{3,9})[\s./-]\d{2,4}|\d{4}[\s./-]\d{1,2}[\s./-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})(?!\d)/i;
 
-const DATE_AT_LINE_START = /^(\d{1,2}-[A-Za-z]{3,9}-\d{4})/i;
+const DATE_AT_LINE_START =
+  /^(\d{1,2}-[A-Za-z]{3,9})(?:-(\d{2,4}))?\b/i;
 
-const AMOUNT_AT_END =
-  /(\d{1,3}(?:,\d{2})*(?:,\d{3})?|\d{1,3}(?:,\d{3})+|\d{2,6})$/;
+/** First signed amount after the date — txn value; trailing values are often running balances. */
+const TXN_SIGNED_AMOUNT =
+  /([+-]\s*\d{1,3}(?:,\d{2,3})*(?:\.\d{2})?)/;
 
 const AMOUNT_PATTERN =
   /(?:₹|Rs\.?|INR\s*)?([+-]?\(?\d[\d,]*(?:\.\d{1,2})?\)?)\s*(?:CR|DR|Cr|Dr)?/gi;
@@ -86,6 +88,41 @@ function parseAmount(raw: unknown): number {
   return Math.abs(n);
 }
 
+function inferStatementYear(text: string): number {
+  const period = text.match(
+    /statement\s+period[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))/i
+  );
+  if (period) return Number(period[4] ?? period[2]);
+
+  const years = text.match(/\b(20\d{2})\b/g);
+  if (years?.length) return Number(years[years.length - 1]);
+
+  return new Date().getFullYear();
+}
+
+function parseLeadingDate(
+  line: string,
+  defaultYear: number
+): { date: Date; rest: string } | null {
+  const withYear = line.match(/^(\d{1,2}-[A-Za-z]{3,9}-\d{4})\b(.*)$/i);
+  if (withYear) {
+    const date = parseDateFromText(withYear[1]);
+    if (!Number.isNaN(date.getTime())) {
+      return { date, rest: withYear[2] ?? "" };
+    }
+  }
+
+  const ddMon = line.match(/^(\d{1,2}-[A-Za-z]{3,9})\b(.*)$/i);
+  if (ddMon) {
+    const date = parseDateFromText(`${ddMon[1]}-${defaultYear}`);
+    if (!Number.isNaN(date.getTime())) {
+      return { date, rest: ddMon[2] ?? "" };
+    }
+  }
+
+  return null;
+}
+
 function parseDateFromText(raw: string): Date {
   const cleaned = raw.replace(/\./g, "/").replace(/\s+/g, " ").trim();
   const slashParts = cleaned.split(/[/-]/).map((p) => p.trim());
@@ -139,37 +176,32 @@ function isSkippableLine(line: string): boolean {
   return false;
 }
 
-function peelAmountsFromEnd(text: string): { merchant: string; amounts: number[] } {
-  const amounts: number[] = [];
-  let rest = text.trim();
+function parseMerchantAndAmount(rest: string): { merchant: string; amount: number } | null {
+  const trimmed = rest.trim();
+  if (!trimmed) return null;
 
-  while (rest.length > 0) {
-    const match = rest.match(AMOUNT_AT_END);
-    if (!match) break;
-    amounts.unshift(parseAmount(match[1]));
-    rest = rest.slice(0, rest.length - match[1].length);
+  const signed = trimmed.match(TXN_SIGNED_AMOUNT);
+  if (signed && signed.index !== undefined) {
+    const amount = parseAmount(signed[1]);
+    const merchant = trimmed.slice(0, signed.index).replace(/\s+/g, " ").trim();
+    if (amount > 0 && merchant) return { merchant, amount };
   }
 
-  return { merchant: rest.replace(/\s+/g, " ").trim(), amounts };
+  return null;
 }
 
-function parseCompressedStatementLine(line: string): ParsedTransaction | null {
-  const match = line.match(/^(\d{1,2}-[A-Za-z]{3,9}-\d{4})(.*)$/i);
-  if (!match) return null;
+function parseCompressedStatementLine(
+  line: string,
+  defaultYear: number
+): ParsedTransaction | null {
+  const leading = parseLeadingDate(line, defaultYear);
+  if (!leading) return null;
 
-  const date = parseDateFromText(match[1]);
-  if (Number.isNaN(date.getTime())) return null;
+  const parsed = parseMerchantAndAmount(leading.rest);
+  if (!parsed) return null;
+  if (SKIP_MERCHANT_PATTERN.test(parsed.merchant)) return null;
 
-  const { merchant, amounts } = peelAmountsFromEnd(match[2]);
-  if (amounts.length === 0) return null;
-  if (!merchant) return null;
-  if (SKIP_MERCHANT_PATTERN.test(merchant)) return null;
-
-  // With debit/credit + balance, the first peeled amount is the transaction value.
-  const amount = amounts[0];
-  if (amount <= 0) return null;
-
-  return { merchant, amount, date };
+  return { merchant: parsed.merchant, amount: parsed.amount, date: leading.date };
 }
 
 function findAmountInText(
@@ -192,10 +224,13 @@ function findAmountInText(
   return null;
 }
 
-function parseLineToTransaction(line: string): ParsedTransaction | null {
+function parseLineToTransaction(
+  line: string,
+  defaultYear: number
+): ParsedTransaction | null {
   if (isSkippableLine(line)) return null;
 
-  const compressed = parseCompressedStatementLine(line);
+  const compressed = parseCompressedStatementLine(line, defaultYear);
   if (compressed) return compressed;
 
   const dateMatch = line.match(DATE_PATTERN);
@@ -248,34 +283,39 @@ function findAmountInRow(row: string[], skipIndexes: number[]): number {
   return best;
 }
 
-function parseFromCompactTableRows(rows: string[][]): ParsedTransaction[] {
+function parseFromCompactTableRows(
+  rows: string[][],
+  defaultYear: number
+): ParsedTransaction[] {
   const results: ParsedTransaction[] = [];
 
   for (const rawRow of rows) {
     const cells = compactRow(rawRow);
-    if (cells.length < 3) continue;
-    if (!DATE_AT_LINE_START.test(cells[0])) continue;
+    if (cells.length < 2) continue;
 
-    const date = parseDateFromText(cells[0].match(DATE_AT_LINE_START)![1]);
-    if (Number.isNaN(date.getTime())) continue;
+    const joined = cells.join(" ");
+    const leading = parseLeadingDate(joined, defaultYear);
+    if (!leading) continue;
 
-    const merchant = cells[1]?.replace(/\s+/g, " ").trim() || "Unknown";
-    if (SKIP_MERCHANT_PATTERN.test(merchant)) continue;
+    const date = leading.date;
 
-    // Typical layout: Date | Description | Debit/Credit | Balance
-    const numericCells = cells.slice(2).map((c) => parseAmount(c));
-    const nonZero = numericCells.filter((n) => n > 0);
-    if (nonZero.length === 0) continue;
+    const parsed = parseMerchantAndAmount(leading.rest);
+    if (!parsed) continue;
+    const resolvedMerchant =
+      parsed.merchant || cells[1]?.replace(/\s+/g, " ").trim() || "Unknown";
+    if (SKIP_MERCHANT_PATTERN.test(resolvedMerchant)) continue;
 
-    const amount = nonZero[0];
-    results.push({ merchant, amount, date });
+    results.push({ merchant: resolvedMerchant, amount: parsed.amount, date });
   }
 
   return results;
 }
 
-function parseFromTableRows(rows: string[][]): ParsedTransaction[] {
-  const compactResults = parseFromCompactTableRows(rows);
+function parseFromTableRows(
+  rows: string[][],
+  defaultYear: number
+): ParsedTransaction[] {
+  const compactResults = parseFromCompactTableRows(rows, defaultYear);
   if (compactResults.length > 0) return compactResults;
 
   const headerIdx = findHeaderRowIndex(rows);
@@ -334,7 +374,7 @@ function parseFromTableRows(rows: string[][]): ParsedTransaction[] {
   return results;
 }
 
-function parseFromLines(lines: string[]): ParsedTransaction[] {
+function parseFromLines(lines: string[], defaultYear: number): ParsedTransaction[] {
   const results: ParsedTransaction[] = [];
   let pendingMerchant = "";
 
@@ -342,7 +382,7 @@ function parseFromLines(lines: string[]): ParsedTransaction[] {
     const line = rawLine.replace(/\s*\|\s*/g, " ").replace(/\s+/g, " ").trim();
     if (!line) continue;
 
-    const parsed = parseLineToTransaction(line);
+    const parsed = parseLineToTransaction(line, defaultYear);
     if (parsed) {
       if (pendingMerchant && parsed.merchant === "Unknown") {
         parsed.merchant = pendingMerchant;
@@ -380,21 +420,23 @@ export function parseTransactionsFromPdfContent(
   text: string,
   rows: string[][]
 ): ParsedTransaction[] {
-  const fromCompact = parseFromCompactTableRows(rows);
+  const defaultYear = inferStatementYear(text);
+
+  const fromCompact = parseFromCompactTableRows(rows, defaultYear);
   if (fromCompact.length > 0) {
     return dedupeTransactions(fromCompact);
   }
 
-  const fromTable = parseFromTableRows(rows);
+  const fromTable = parseFromTableRows(rows, defaultYear);
   const lineSource =
     rows.length > 0
       ? rows.map((row) => (row.length === 1 ? row[0] : row.join(" | ")))
       : text.split(/\r?\n/);
 
-  const fromLines = parseFromLines(lineSource);
+  const fromLines = parseFromLines(lineSource, defaultYear);
   const merged = dedupeTransactions([...fromTable, ...fromLines]);
 
   if (merged.length > 0) return merged;
 
-  return dedupeTransactions(parseFromLines(text.split(/\r?\n/)));
+  return dedupeTransactions(parseFromLines(text.split(/\r?\n/), defaultYear));
 }

@@ -38,4 +38,14 @@ export const cardService = {
       },
     });
   },
+
+  /** Keeps only card IDs that belong to this user (ignores unknown IDs). */
+  async filterOwnedCardIds(userId: string, cardIds: string[]): Promise<string[]> {
+    if (cardIds.length === 0) return [];
+    const owned = await prisma.creditCard.findMany({
+      where: { userId, id: { in: cardIds } },
+      select: { id: true },
+    });
+    return owned.map((c) => c.id);
+  },
 };

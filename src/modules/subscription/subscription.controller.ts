@@ -1,6 +1,10 @@
 import { Response } from "express";
 import { AuthRequest } from "../../middlewares/auth.middleware";
 import { subscriptionService } from "./subscription.service";
+import {
+  parseCardIdsFromQuery,
+  resolveCardIdsForUser,
+} from "./subscription.query";
 
 function prismaErrorStatus(err: unknown): number {
   if (err && typeof err === "object" && "code" in err) {
@@ -34,10 +38,25 @@ export const subscriptionController = {
 
   async list(req: AuthRequest, res: Response) {
     try {
-      const subs = await subscriptionService.list(req.userId!);
+      const requested = parseCardIdsFromQuery(req);
+      const cardIds = await resolveCardIdsForUser(req.userId!, requested);
+      const subs = await subscriptionService.list(req.userId!, cardIds);
       res.json(subs);
     } catch (err) {
       console.error("[subscriptions] list error:", err);
+      const status = prismaErrorStatus(err);
+      res.status(status).json({ message: prismaErrorMessage(err) });
+    }
+  },
+
+  async summary(req: AuthRequest, res: Response) {
+    try {
+      const requested = parseCardIdsFromQuery(req);
+      const cardIds = await resolveCardIdsForUser(req.userId!, requested);
+      const summary = await subscriptionService.getSummary(req.userId!, cardIds);
+      res.json(summary);
+    } catch (err) {
+      console.error("[subscriptions] summary error:", err);
       const status = prismaErrorStatus(err);
       res.status(status).json({ message: prismaErrorMessage(err) });
     }

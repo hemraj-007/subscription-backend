@@ -50,7 +50,7 @@ export async function detectSubscriptionGroups(userId: string) {
 
   for (const tx of transactions) {
     const normalized = normalizeMerchant(tx.merchant);
-    const key = `${normalized}-${tx.amount}`;
+    const key = `${tx.cardId}-${normalized}-${tx.amount}`;
 
     if (!map.has(key)) {
       map.set(key, {

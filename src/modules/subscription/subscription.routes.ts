@@ -5,6 +5,7 @@ import { authMiddleware } from "../../middlewares/auth.middleware";
 const router = Router();
 
 router.post("/detect", authMiddleware, subscriptionController.detect);
+router.get("/summary", authMiddleware, subscriptionController.summary);
 router.get("/", authMiddleware, subscriptionController.list);
 
 export default router;

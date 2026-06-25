@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma";
 import { detectSubscriptionGroups } from "./subscription.detector";
+import { buildSubscriptionSummary } from "./subscription.summary";
 
 const ONE_MONTH = 30 * 24 * 60 * 60 * 1000;
 
@@ -13,8 +14,9 @@ export const subscriptionService = {
 
       const subscription = await prisma.subscription.upsert({
         where: {
-          userId_merchant_amount: {
+          userId_cardId_merchant_amount: {
             userId,
+            cardId: group.cardId,
             merchant: group.merchant,
             amount: group.amount,
           },
@@ -40,13 +42,30 @@ export const subscriptionService = {
     return created;
   },
 
-  async list(userId: string) {
+  async list(userId: string, cardIds?: string[]) {
     return prisma.subscription.findMany({
-      where: { userId },
+      where: {
+        userId,
+        ...(cardIds?.length ? { cardId: { in: cardIds } } : {}),
+      },
       orderBy: [
         { nextCharge: { sort: "asc", nulls: "last" } },
         { lastCharged: "desc" },
       ],
+      include: {
+        card: { select: { id: true, last4: true, bankName: true, network: true } },
+      },
     });
+  },
+
+  async getSummary(userId: string, cardIds?: string[]) {
+    const subs = await prisma.subscription.findMany({
+      where: {
+        userId,
+        ...(cardIds?.length ? { cardId: { in: cardIds } } : {}),
+      },
+      orderBy: { nextCharge: "asc" },
+    });
+    return buildSubscriptionSummary(subs);
   },
 };

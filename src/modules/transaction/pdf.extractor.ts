@@ -97,7 +97,9 @@ function scoreExtractedContent(text: string, rows: string[][]): number {
   ).length;
   const structuredTxnRows = rows
     .map(compactRow)
-    .filter((cells) => /^\d{1,2}-[A-Za-z]{3,9}-\d{4}$/i.test(cells[0] ?? ""))
+    .filter((cells) =>
+      /^\d{1,2}-[A-Za-z]{3,9}(?:-\d{2,4})?\b/i.test(cells[0] ?? cells.join(" "))
+    )
     .length;
 
   return (
@@ -139,7 +141,9 @@ async function extractWithPdfParse(buffer: Buffer): Promise<PdfExtractResult | n
 function countStructuredTransactionRows(rows: string[][]): number {
   return rows
     .map(compactRow)
-    .filter((cells) => /^\d{1,2}-[A-Za-z]{3,9}-\d{4}$/i.test(cells[0] ?? ""))
+    .filter((cells) =>
+      /^\d{1,2}-[A-Za-z]{3,9}(?:-\d{2,4})?\b/i.test(cells[0] ?? cells.join(" "))
+    )
     .length;
 }
 
