@@ -74,4 +74,10 @@ async function start() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
-start();
+// Only start a long-running server when run directly (local/Railway/Docker).
+// On Vercel serverless, api/index.ts imports the app instead.
+if (require.main === module) {
+  start();
+}
+
+export default app;
