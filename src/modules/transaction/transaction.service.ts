@@ -8,6 +8,7 @@ export const transactionService = {
         cardId,
         merchant: tx.merchant,
         amount: tx.amount,
+        type: tx.type,
         date: tx.date,
       })),
       skipDuplicates: true,

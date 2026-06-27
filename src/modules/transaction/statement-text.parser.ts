@@ -1,4 +1,4 @@
-import { ParsedTransaction } from "./transaction.types";
+import { ParsedTransaction, TransactionKind } from "./transaction.types";
 
 // Allow dates immediately followed by letters (pdf-parse often omits spaces).
 const DATE_PATTERN =
@@ -10,6 +10,12 @@ const DATE_AT_LINE_START =
 /** First signed amount after the date — txn value; trailing values are often running balances. */
 const TXN_SIGNED_AMOUNT =
   /([+-]\s*\d{1,3}(?:,\d{2,3})*(?:\.\d{2})?)/;
+
+/** Any money-like token: grouped (1,24,351 / 48,000) or plain digits, optional sign/decimals. */
+const MONEY_TOKEN = /[+-]?(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?/g;
+
+/** Reject parsed values above this (10 crore) — almost certainly a ref/account number, not an amount. */
+const MAX_REASONABLE_AMOUNT = 100_000_000;
 
 const AMOUNT_PATTERN =
   /(?:₹|Rs\.?|INR\s*)?([+-]?\(?\d[\d,]*(?:\.\d{1,2})?\)?)\s*(?:CR|DR|Cr|Dr)?/gi;
@@ -85,7 +91,9 @@ function parseAmount(raw: unknown): number {
   s = s.replace(/[₹]|Rs\.?|INR/gi, "").trim();
   const n = Number(s.replace(/[^\d.-]/g, ""));
   if (Number.isNaN(n)) return 0;
-  return Math.abs(n);
+  const abs = Math.abs(n);
+  if (abs > MAX_REASONABLE_AMOUNT) return 0;
+  return abs;
 }
 
 function inferStatementYear(text: string): number {
@@ -130,7 +138,9 @@ function parseDateFromText(raw: string): Date {
   if (slashParts.length === 3) {
     if (slashParts[0].length === 4) {
       const [y, m, d] = slashParts.map(Number);
-      return new Date(y, m - 1, d);
+      if (m < 1 || m > 12) return new Date(NaN);
+      // Build in UTC so later .toISOString() does not shift the calendar day.
+      return new Date(Date.UTC(y, m - 1, d));
     }
 
     const [dStr, rawMonth, yStr] = slashParts;
@@ -152,8 +162,9 @@ function parseDateFromText(raw: string): Date {
       monthNames.indexOf(rawMonth.slice(0, 3).toLowerCase()) + 1;
     const monthNumeric = Number(rawMonth);
     const month = Number.isNaN(monthNumeric) ? monthFromName : monthNumeric;
+    if (month < 1 || month > 12) return new Date(NaN);
     const y = yStr.length === 2 ? Number(`20${yStr}`) : Number(yStr);
-    return new Date(y, month - 1, Number(dStr));
+    return new Date(Date.UTC(y, month - 1, Number(dStr)));
   }
 
   const spaced = cleaned.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})$/);
@@ -176,15 +187,32 @@ function isSkippableLine(line: string): boolean {
   return false;
 }
 
-function parseMerchantAndAmount(rest: string): { merchant: string; amount: number } | null {
+function parseMerchantAndAmount(
+  rest: string
+): { merchant: string; amount: number; type: TransactionKind } | null {
   const trimmed = rest.trim();
   if (!trimmed) return null;
 
+  // Prefer an explicitly signed amount: it is the transaction value, while a
+  // trailing unsigned number is usually the running balance. By convention here
+  // a leading "-" is money out (DEBIT) and "+" is money in (CREDIT).
   const signed = trimmed.match(TXN_SIGNED_AMOUNT);
   if (signed && signed.index !== undefined) {
     const amount = parseAmount(signed[1]);
+    const type: TransactionKind = signed[1].trim().startsWith("+") ? "CREDIT" : "DEBIT";
     const merchant = trimmed.slice(0, signed.index).replace(/\s+/g, " ").trim();
-    if (amount > 0 && merchant) return { merchant, amount };
+    if (amount > 0 && merchant) return { merchant, amount, type };
+  }
+
+  // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
+  // first money-like token as the transaction value (balance, if any, trails it).
+  const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN));
+  for (const token of tokens) {
+    if (token.index === undefined) continue;
+    const amount = parseAmount(token[0]);
+    if (amount <= 0) continue;
+    const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
+    if (merchant) return { merchant, amount, type: "DEBIT" };
   }
 
   return null;
@@ -201,7 +229,12 @@ function parseCompressedStatementLine(
   if (!parsed) return null;
   if (SKIP_MERCHANT_PATTERN.test(parsed.merchant)) return null;
 
-  return { merchant: parsed.merchant, amount: parsed.amount, date: leading.date };
+  return {
+    merchant: parsed.merchant,
+    amount: parsed.amount,
+    type: parsed.type,
+    date: leading.date,
+  };
 }
 
 function findAmountInText(
@@ -254,7 +287,7 @@ function parseLineToTransaction(
       : afterDate.replace(amountInfo.token, "");
   const merchant = merchantSlice.replace(/\s+/g, " ").trim() || "Unknown";
 
-  return { merchant, amount: amountInfo.amount, date };
+  return { merchant, amount: amountInfo.amount, type: "DEBIT", date };
 }
 
 function findHeaderRowIndex(rows: string[][]): number {
@@ -305,19 +338,27 @@ function parseFromCompactTableRows(
       parsed.merchant || cells[1]?.replace(/\s+/g, " ").trim() || "Unknown";
     if (SKIP_MERCHANT_PATTERN.test(resolvedMerchant)) continue;
 
-    results.push({ merchant: resolvedMerchant, amount: parsed.amount, date });
+    results.push({
+      merchant: resolvedMerchant,
+      amount: parsed.amount,
+      type: parsed.type,
+      date,
+    });
   }
 
   return results;
 }
 
-function parseFromTableRows(
+/**
+ * Parses a table that has an explicit header row (Date / Description / Debit /
+ * Credit / Balance ...). This is the most reliable shape because it can tell
+ * debit columns from credit columns; callers should prefer it over the
+ * column-agnostic compact parser, which would otherwise tag every row DEBIT.
+ */
+function parseFromHeaderTable(
   rows: string[][],
   defaultYear: number
 ): ParsedTransaction[] {
-  const compactResults = parseFromCompactTableRows(rows, defaultYear);
-  if (compactResults.length > 0) return compactResults;
-
   const headerIdx = findHeaderRowIndex(rows);
   if (headerIdx < 0) return [];
 
@@ -347,8 +388,12 @@ function parseFromTableRows(
     if (Number.isNaN(date.getTime())) continue;
 
     let amount = 0;
+    let type: TransactionKind = "DEBIT";
     if (debitCol >= 0) amount = parseAmount(row[debitCol]);
-    if (amount <= 0 && creditCol >= 0) amount = parseAmount(row[creditCol]);
+    if (amount <= 0 && creditCol >= 0) {
+      amount = parseAmount(row[creditCol]);
+      if (amount > 0) type = "CREDIT";
+    }
     if (amount <= 0 && amountCol >= 0) amount = parseAmount(row[amountCol]);
     if (amount <= 0) {
       const skip = [dateCol, merchantCol, balanceCol].filter((i) => i >= 0);
@@ -368,7 +413,7 @@ function parseFromTableRows(
     if (!merchant) merchant = "Unknown";
     if (SKIP_MERCHANT_PATTERN.test(merchant)) continue;
 
-    results.push({ merchant, amount, date });
+    results.push({ merchant, amount, type, date });
   }
 
   return results;
@@ -422,19 +467,27 @@ export function parseTransactionsFromPdfContent(
 ): ParsedTransaction[] {
   const defaultYear = inferStatementYear(text);
 
-  const fromCompact = parseFromCompactTableRows(rows, defaultYear);
-  if (fromCompact.length > 0) {
-    return dedupeTransactions(fromCompact);
-  }
+  // Prefer an explicit header table: it is the only shape that reliably
+  // distinguishes debit from credit columns. Listed first so its credit/debit
+  // classification wins during dedupe over the column-agnostic parsers below.
+  const fromHeader = parseFromHeaderTable(rows, defaultYear);
 
-  const fromTable = parseFromTableRows(rows, defaultYear);
+  // The compact parser handles compressed single-cell rows (and signed amounts).
+  // Skip it when a header table already produced rows to avoid DEBIT-tagging credits.
+  const fromCompact =
+    fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, defaultYear);
+
   const lineSource =
     rows.length > 0
       ? rows.map((row) => (row.length === 1 ? row[0] : row.join(" | ")))
       : text.split(/\r?\n/);
 
   const fromLines = parseFromLines(lineSource, defaultYear);
-  const merged = dedupeTransactions([...fromTable, ...fromLines]);
+  const merged = dedupeTransactions([
+    ...fromHeader,
+    ...fromCompact,
+    ...fromLines,
+  ]);
 
   if (merged.length > 0) return merged;
 

@@ -44,7 +44,26 @@ export const cardController = {
     const raw = req.params.id;
     const id = Array.isArray(raw) ? raw[0] ?? "" : (raw ?? "");
 
-    await cardService.deleteCard(req.userId!, id);
-    res.json({ success: true });
+    try {
+      const result = await cardService.deleteCard(req.userId!, id);
+      if (result.count === 0) {
+        return res
+          .status(404)
+          .json({ message: "Card not found or you don't have access to it" });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[cards] delete error:", err);
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? String((err as { code?: string }).code)
+          : "";
+      const isDb = code === "P1001" || code === "P1002" || code === "P1008";
+      res.status(isDb ? 503 : 500).json({
+        message: isDb
+          ? "Database is unavailable. Check that PostgreSQL is running and DATABASE_URL is correct."
+          : "Failed to delete card",
+      });
+    }
   },
 };

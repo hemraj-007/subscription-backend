@@ -42,6 +42,8 @@ export async function detectSubscriptionGroups(userId: string) {
   const transactions = await prisma.transaction.findMany({
     where: {
       card: { userId },
+      // Subscriptions are recurring charges (money out), never credits/refunds.
+      type: "DEBIT",
     },
     orderBy: { date: "asc" },
   });
