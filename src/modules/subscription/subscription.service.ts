@@ -43,6 +43,8 @@ export const subscriptionService = {
   },
 
   async list(userId: string, cardIds?: string[]) {
+    if (cardIds && cardIds.length === 0) return [];
+
     return prisma.subscription.findMany({
       where: {
         userId,
@@ -59,6 +61,10 @@ export const subscriptionService = {
   },
 
   async getSummary(userId: string, cardIds?: string[]) {
+    if (cardIds && cardIds.length === 0) {
+      return buildSubscriptionSummary([]);
+    }
+
     const subs = await prisma.subscription.findMany({
       where: {
         userId,
