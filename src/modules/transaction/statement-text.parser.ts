@@ -452,7 +452,7 @@ function dedupeTransactions(transactions: ParsedTransaction[]): ParsedTransactio
   const unique: ParsedTransaction[] = [];
 
   for (const tx of transactions) {
-    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}`;
+    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}|${tx.type}`;
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(tx);

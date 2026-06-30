@@ -52,6 +52,20 @@ test("signed credit lines are tagged CREDIT", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("dedupe keeps matching debit and credit reversal pairs", () => {
+  const txs = fromLines([
+    "08-May Spotify Premium -119 1,24,232",
+    "08-May Spotify Premium +119 1,24,351",
+  ]);
+  const spotify = txs.filter((t) => t.merchant.includes("Spotify Premium"));
+
+  assert.equal(spotify.length, 2);
+  assert.deepEqual(
+    spotify.map((t) => t.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
+
 test("long reference numbers are not read as the amount", () => {
   const txs = fromLines(["10-May Ref 1234567890123 Amazon 299 1,20,000"]);
   const amazon = find(txs, "Amazon");
