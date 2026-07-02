@@ -199,8 +199,9 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           amount = credit;
           type = "CREDIT";
         } else if (generic > 0) {
-          // A leading "-" or parenthesis in a single amount column means money in.
-          type = /^\s*[-(]/.test(rawGeneric) ? "CREDIT" : "DEBIT";
+          // In single signed amount columns, negative values are money out and
+          // positive signed values are money in.
+          type = /^\s*\+/.test(rawGeneric) ? "CREDIT" : "DEBIT";
         }
 
         const date = parseDate(row[dateKey] ?? row.date);
