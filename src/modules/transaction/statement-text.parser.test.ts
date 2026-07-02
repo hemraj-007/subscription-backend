@@ -91,3 +91,24 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("CR suffixed fallback lines are tagged CREDIT", () => {
+  const txs = fromLines(["06-May Netflix Refund 649 CR 1,24,351"]);
+  const refund = find(txs, "Netflix Refund");
+  assert.equal(refund.amount, 649);
+  assert.equal(refund.type, "CREDIT");
+});
+
+test("same-day debit and credit with the same amount are both kept", () => {
+  const txs = fromLines([
+    "06-May Netflix Subscription -649 1,24,351",
+    "06-May Netflix Subscription +649 1,25,000",
+  ]);
+  const netflix = txs.filter((t) => t.merchant.includes("Netflix Subscription"));
+
+  assert.equal(netflix.length, 2);
+  assert.deepEqual(
+    netflix.map((t) => t.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
