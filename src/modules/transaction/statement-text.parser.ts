@@ -96,6 +96,13 @@ function parseAmount(raw: unknown): number {
   return abs;
 }
 
+function inferAmountType(numericToken: string, tokenContext = numericToken): TransactionKind {
+  if (/\bcr\b/i.test(tokenContext) || numericToken.trim().startsWith("+")) {
+    return "CREDIT";
+  }
+  return "DEBIT";
+}
+
 function inferStatementYear(text: string): number {
   const period = text.match(
     /statement\s+period[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))/i
@@ -212,7 +219,14 @@ function parseMerchantAndAmount(
     const amount = parseAmount(token[0]);
     if (amount <= 0) continue;
     const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
-    if (merchant) return { merchant, amount, type: "DEBIT" };
+    const afterAmount = trimmed.slice(token.index + token[0].length);
+    if (merchant) {
+      return {
+        merchant,
+        amount,
+        type: inferAmountType(token[0], `${token[0]} ${afterAmount}`),
+      };
+    }
   }
 
   return null;
@@ -252,11 +266,7 @@ function findAmountInText(
     const numeric = match[1] ?? token;
     const amount = parseAmount(numeric);
     if (amount > 0) {
-      const type: TransactionKind =
-        /\bcr\b/i.test(token) || numeric.trim().startsWith("+")
-          ? "CREDIT"
-          : "DEBIT";
-      return { amount, token, type };
+      return { amount, token, type: inferAmountType(numeric, token) };
     }
   }
 
