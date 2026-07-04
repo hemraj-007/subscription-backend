@@ -3,12 +3,15 @@ import { prisma } from "../config/prisma";
 
 const INACTIVITY_DAYS = 30;
 
-export async function detectUnusedSubscriptions() {
+export async function detectUnusedSubscriptions(userId?: string) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - INACTIVITY_DAYS);
 
   const subscriptions = await prisma.subscription.findMany({
-    where: { status: SubscriptionStatus.ACTIVE },
+    where: {
+      status: SubscriptionStatus.ACTIVE,
+      ...(userId ? { userId } : {}),
+    },
   });
 
   if (subscriptions.length === 0) return;

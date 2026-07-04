@@ -26,4 +26,6 @@ export const env = {
   RUN_SCHEDULER: parseBoolean(process.env.RUN_SCHEDULER, false),
   /** Comma-separated origins for CORS; if set, only these are allowed. Omit in dev for "*". */
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
+  /** Shared secret for the /api/jobs/run cron endpoint (Vercel Cron sends it as a Bearer token). */
+  CRON_SECRET: process.env.CRON_SECRET,
 };

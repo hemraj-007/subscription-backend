@@ -1,10 +1,11 @@
 import { prisma } from "../config/prisma";
 
-export async function generateRenewalAlerts() {
+export async function generateRenewalAlerts(userId?: string) {
   const subscriptions = await prisma.subscription.findMany({
     where: {
       status: "ACTIVE",
       nextCharge: { not: null },
+      ...(userId ? { userId } : {}),
     },
   });
 

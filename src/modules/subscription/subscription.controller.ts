@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../../middlewares/auth.middleware";
 import { subscriptionService } from "./subscription.service";
+import { alertService } from "../alert/alert.service";
 import {
   parseCardIdsFromQuery,
   resolveCardIdsForUser,
@@ -28,6 +29,13 @@ export const subscriptionController = {
   async detect(req: AuthRequest, res: Response) {
     try {
       const subs = await subscriptionService.detectAndSave(req.userId!);
+      // Refresh alerts for this user now (serverless has no cron). Best-effort:
+      // a failure here must not fail the detection response.
+      try {
+        await alertService.refreshAlertsForUser(req.userId!);
+      } catch (alertErr) {
+        console.error("[subscriptions] alert refresh failed:", alertErr);
+      }
       res.json(subs);
     } catch (err) {
       console.error("[subscriptions] detect error:", err);
