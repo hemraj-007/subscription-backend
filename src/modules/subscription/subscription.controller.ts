@@ -69,4 +69,20 @@ export const subscriptionController = {
       res.status(status).json({ message: prismaErrorMessage(err) });
     }
   },
+
+  async getOne(req: AuthRequest, res: Response) {
+    try {
+      const raw = req.params.id;
+      const id = Array.isArray(raw) ? raw[0] ?? "" : (raw ?? "");
+      const sub = await subscriptionService.getOne(req.userId!, id);
+      if (!sub) {
+        return res.status(404).json({ message: "Subscription not found" });
+      }
+      res.json(sub);
+    } catch (err) {
+      console.error("[subscriptions] getOne error:", err);
+      const status = prismaErrorStatus(err);
+      res.status(status).json({ message: prismaErrorMessage(err) });
+    }
+  },
 };

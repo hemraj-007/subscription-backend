@@ -68,4 +68,13 @@ export const subscriptionService = {
     });
     return buildSubscriptionSummary(subs);
   },
+
+  async getOne(userId: string, subscriptionId: string) {
+    return prisma.subscription.findFirst({
+      where: { id: subscriptionId, userId },
+      include: {
+        card: { select: { id: true, last4: true, bankName: true, network: true } },
+      },
+    });
+  },
 };
