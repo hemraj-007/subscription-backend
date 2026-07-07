@@ -28,4 +28,6 @@ export const env = {
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
   /** Shared secret for the /api/jobs/run cron endpoint (Vercel Cron sends it as a Bearer token). */
   CRON_SECRET: process.env.CRON_SECRET,
+  /** When true, POST /api/plan/upgrade activates Pro without a payment provider (dev/staging only). */
+  BILLING_DEV_MODE: parseBoolean(process.env.BILLING_DEV_MODE, false),
 };

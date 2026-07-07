@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma";
+import { planService } from "../plan/plan.service";
 
 export const cardService = {
   async createCard(userId: string, data: {
@@ -6,6 +7,8 @@ export const cardService = {
     bankName?: string;
     network?: string;
   }) {
+    await planService.assertCanAddCard(userId);
+
     return prisma.creditCard.create({
       data: {
         userId,

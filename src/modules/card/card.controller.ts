@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { cardService } from "./card.service";
 import { AuthRequest } from "../../middlewares/auth.middleware";
+import { PlanLimitError } from "../plan/plan.errors";
 
 export const cardController = {
   async create(req: AuthRequest, res: Response) {
@@ -11,13 +12,25 @@ export const cardController = {
       return res.status(400).json({ message: "Invalid card digits; provide exactly 4 digits" });
     }
 
-    const card = await cardService.createCard(req.userId!, {
-      last4: trimmed,
-      bankName: typeof bankName === "string" ? bankName.trim().slice(0, 100) : undefined,
-      network: typeof network === "string" ? network.trim().slice(0, 50) : undefined,
-    });
+    try {
+      const card = await cardService.createCard(req.userId!, {
+        last4: trimmed,
+        bankName: typeof bankName === "string" ? bankName.trim().slice(0, 100) : undefined,
+        network: typeof network === "string" ? network.trim().slice(0, 50) : undefined,
+      });
 
-    res.status(201).json(card);
+      res.status(201).json(card);
+    } catch (err) {
+      if (err instanceof PlanLimitError) {
+        return res.status(err.status).json({
+          message: err.message,
+          code: err.code,
+          feature: err.feature,
+          requiredPlan: err.requiredPlan,
+        });
+      }
+      throw err;
+    }
   },
 
   async list(req: AuthRequest, res: Response) {

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { authService } from "./auth.service";
+import { AuthRequest } from "../../middlewares/auth.middleware";
 
 export const authController = {
   async signup(req: Request, res: Response) {
@@ -39,6 +40,16 @@ export const authController = {
       return res.json(result);
     } catch (err: any) {
       return res.status(401).json({ message: err.message });
+    }
+  },
+
+  async me(req: AuthRequest, res: Response) {
+    try {
+      const user = await authService.me(req.userId!);
+      return res.json({ user });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "User not found";
+      return res.status(404).json({ message });
     }
   },
 };
