@@ -461,11 +461,15 @@ function dedupeTransactions(transactions: ParsedTransaction[]): ParsedTransactio
   return unique;
 }
 
+function rowsToText(rows: string[][]): string {
+  return rows.map((row) => row.join(" | ")).join("\n");
+}
+
 export function parseTransactionsFromPdfContent(
   text: string,
   rows: string[][]
 ): ParsedTransaction[] {
-  const defaultYear = inferStatementYear(text);
+  const defaultYear = inferStatementYear([text, rowsToText(rows)].join("\n"));
 
   // Prefer an explicit header table: it is the only shape that reliably
   // distinguishes debit from credit columns. Listed first so its credit/debit

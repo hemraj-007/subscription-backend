@@ -91,3 +91,19 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("DD-Mon rows infer the statement year from row text when extractor text omits it", () => {
+  const rows = [
+    ["Statement Period 01 Dec 2025 - 31 Dec 2025"],
+    ["03-Dec Netflix Subscription -649 1,24,351"],
+    ["04-Dec Spotify Premium -119 1,24,232"],
+  ];
+
+  const txs = parseTransactionsFromPdfContent("Transactions", rows);
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(isoDay(netflix.date), "2025-12-03");
+
+  const spotify = find(txs, "Spotify");
+  assert.equal(isoDay(spotify.date), "2025-12-04");
+});
