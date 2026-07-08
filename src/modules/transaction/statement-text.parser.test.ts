@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { parseTransactionsFromPdfContent } from "./statement-text.parser";
+import { parseCSV } from "./transaction.parser";
 import { ParsedTransaction } from "./transaction.types";
 
 const PERIOD = "Statement Period 01 May 2026 - 31 May 2026";
@@ -76,6 +80,23 @@ test("header tables distinguish debit and credit columns", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("dedupe preserves opposite transaction types for same merchant amount and date", () => {
+  const rows = [
+    ["Date", "Description", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "Store Refund Pair", "649", "", "124351"],
+    ["03/05/2026", "Store Refund Pair", "", "649", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows).filter((tx) =>
+    tx.merchant.includes("Store Refund Pair")
+  );
+
+  assert.equal(txs.length, 2);
+  assert.deepEqual(
+    txs.map((tx) => tx.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
+
 test("compressed single-cell table rows parse like lines", () => {
   const rows = [
     [PERIOD],
@@ -90,4 +111,27 @@ test("compressed single-cell table rows parse like lines", () => {
 
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
+});
+
+test("CSV single amount signs classify charges and credits consistently", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "statement-parser-"));
+  const file = join(dir, "statement.csv");
+  await writeFile(
+    file,
+    [
+      "Date,Description,Amount",
+      "2026-05-03,Netflix,-649",
+      "2026-05-04,Spotify,(119)",
+      "2026-05-05,Refund,+649",
+    ].join("\n")
+  );
+
+  try {
+    const txs = await parseCSV(file);
+    assert.equal(find(txs, "Netflix").type, "DEBIT");
+    assert.equal(find(txs, "Spotify").type, "DEBIT");
+    assert.equal(find(txs, "Refund").type, "CREDIT");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
