@@ -96,6 +96,13 @@ function parseAmount(raw: unknown): number {
   return abs;
 }
 
+function inferAmountType(numericToken: string, tokenContext = numericToken): TransactionKind {
+  if (/\bcr\b/i.test(tokenContext) || numericToken.trim().startsWith("+")) {
+    return "CREDIT";
+  }
+  return "DEBIT";
+}
+
 function inferStatementYear(text: string): number {
   const period = text.match(
     /statement\s+period[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))/i
@@ -212,7 +219,14 @@ function parseMerchantAndAmount(
     const amount = parseAmount(token[0]);
     if (amount <= 0) continue;
     const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
-    if (merchant) return { merchant, amount, type: "DEBIT" };
+    const afterAmount = trimmed.slice(token.index + token[0].length);
+    if (merchant) {
+      return {
+        merchant,
+        amount,
+        type: inferAmountType(token[0], `${token[0]} ${afterAmount}`),
+      };
+    }
   }
 
   return null;
@@ -240,7 +254,7 @@ function parseCompressedStatementLine(
 function findAmountInText(
   text: string,
   prefer: "first" | "last" = "first"
-): { amount: number; token: string } | null {
+): { amount: number; token: string; type: TransactionKind } | null {
   const matches = Array.from(text.matchAll(AMOUNT_PATTERN));
   if (matches.length === 0) return null;
 
@@ -251,7 +265,9 @@ function findAmountInText(
     const token = match[0] ?? "";
     const numeric = match[1] ?? token;
     const amount = parseAmount(numeric);
-    if (amount > 0) return { amount, token };
+    if (amount > 0) {
+      return { amount, token, type: inferAmountType(numeric, token) };
+    }
   }
 
   return null;
@@ -287,7 +303,7 @@ function parseLineToTransaction(
       : afterDate.replace(amountInfo.token, "");
   const merchant = merchantSlice.replace(/\s+/g, " ").trim() || "Unknown";
 
-  return { merchant, amount: amountInfo.amount, type: "DEBIT", date };
+  return { merchant, amount: amountInfo.amount, type: amountInfo.type, date };
 }
 
 function findHeaderRowIndex(rows: string[][]): number {
@@ -452,7 +468,7 @@ function dedupeTransactions(transactions: ParsedTransaction[]): ParsedTransactio
   const unique: ParsedTransaction[] = [];
 
   for (const tx of transactions) {
-    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}`;
+    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}|${tx.type}`;
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(tx);
