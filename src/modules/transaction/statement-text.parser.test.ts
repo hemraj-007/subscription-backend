@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 
+import { parseCSV } from "./transaction.parser";
 import { parseTransactionsFromPdfContent } from "./statement-text.parser";
 import { ParsedTransaction } from "./transaction.types";
 
@@ -74,6 +78,53 @@ test("header tables distinguish debit and credit columns", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.amount, 48000);
   assert.equal(salary.type, "CREDIT");
+});
+
+test("same-day equal debit and credit transactions are not deduped together", () => {
+  const rows = [
+    ["Date", "Description", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["03/05/2026", "Netflix", "", "649", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = txs.filter((t) => t.merchant === "Netflix" && t.amount === 649);
+  assert.equal(netflix.length, 2);
+  assert.deepEqual(
+    netflix.map((t) => t.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
+
+test("single-amount CSV signs classify charges and refunds correctly", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "statement-csv-"));
+  const file = path.join(dir, "statement.csv");
+
+  try {
+    await writeFile(
+      file,
+      [
+        "date,merchant,amount",
+        "03/05/2026,Netflix,-649",
+        "04/05/2026,Refund,+649",
+        "05/05/2026,Spotify,(119)",
+        "06/05/2026,Amazon,299",
+      ].join("\n")
+    );
+
+    const txs = await parseCSV(file);
+    assert.deepEqual(
+      txs.map((t) => [t.merchant, t.amount, t.type]),
+      [
+        ["Netflix", 649, "DEBIT"],
+        ["Refund", 649, "CREDIT"],
+        ["Spotify", 119, "DEBIT"],
+        ["Amazon", 299, "DEBIT"],
+      ]
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("compressed single-cell table rows parse like lines", () => {
