@@ -52,6 +52,19 @@ test("signed credit lines are tagged CREDIT", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("same-day equal debit and credit are not deduped together", () => {
+  const txs = fromLines([
+    "03-May Netflix Subscription -649 1,24,351",
+    "03-May Netflix Subscription +649 1,25,000",
+  ]).filter((tx) => tx.merchant.toLowerCase().includes("netflix"));
+
+  assert.equal(txs.length, 2);
+  assert.deepEqual(
+    txs.map((tx) => tx.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
+
 test("long reference numbers are not read as the amount", () => {
   const txs = fromLines(["10-May Ref 1234567890123 Amazon 299 1,20,000"]);
   const amazon = find(txs, "Amazon");

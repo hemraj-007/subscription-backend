@@ -80,7 +80,7 @@ model Transaction {
 
   createdAt DateTime @default(now())
 
-  @@unique([cardId, merchant, amount, date])
+  @@unique([cardId, merchant, amount, date, type])
   @@index([cardId, merchant, date])
 }
 
