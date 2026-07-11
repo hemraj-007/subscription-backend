@@ -1,5 +1,6 @@
 import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import { normalizeMerchant } from "../modules/subscription/merchant.normalizer";
 
 const INACTIVITY_DAYS = 30;
 
@@ -9,7 +10,7 @@ export async function detectUnusedSubscriptions(userId?: string) {
 
   const subscriptions = await prisma.subscription.findMany({
     where: {
-      status: SubscriptionStatus.ACTIVE,
+      status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.AT_RISK] },
       ...(userId ? { userId } : {}),
     },
   });
@@ -17,22 +18,24 @@ export async function detectUnusedSubscriptions(userId?: string) {
   if (subscriptions.length === 0) return;
 
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
-  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
-
-  const txGroups = await prisma.transaction.groupBy({
-    by: ["cardId", "merchant"],
+  const recentTransactions = await prisma.transaction.findMany({
     where: {
       cardId: { in: cardIds },
-      merchant: { in: merchants },
+      type: "DEBIT",
+      date: { gte: cutoff },
     },
-    _max: { date: true },
+    select: {
+      cardId: true,
+      merchant: true,
+      date: true,
+    },
   });
 
   const lastTxByCardMerchant = new Map<string, Date>();
-  for (const row of txGroups) {
-    if (row._max.date) {
-      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
-    }
+  for (const tx of recentTransactions) {
+    const key = `${tx.cardId}:${normalizeMerchant(tx.merchant)}`;
+    const existing = lastTxByCardMerchant.get(key);
+    if (!existing || tx.date > existing) lastTxByCardMerchant.set(key, tx.date);
   }
 
   const existingUnusedAlerts = await prisma.alert.findMany({
@@ -50,11 +53,19 @@ export async function detectUnusedSubscriptions(userId?: string) {
   );
 
   const atRiskIds: string[] = [];
+  const recoveredIds: string[] = [];
   const alertsToCreate: { userId: string; type: "UNUSED"; message: string; scheduledAt: Date }[] = [];
 
   for (const sub of subscriptions) {
     const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
-    if (!lastTxDate || lastTxDate < cutoff) {
+    if (lastTxDate && lastTxDate >= cutoff) {
+      if (sub.status === SubscriptionStatus.AT_RISK) {
+        recoveredIds.push(sub.id);
+      }
+      continue;
+    }
+
+    if (sub.status === SubscriptionStatus.ACTIVE) {
       atRiskIds.push(sub.id);
       const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
       const key = `${sub.userId}:${message}`;
@@ -77,6 +88,15 @@ export async function detectUnusedSubscriptions(userId?: string) {
         status: SubscriptionStatus.ACTIVE,
       },
       data: { status: SubscriptionStatus.AT_RISK },
+    });
+  }
+  if (recoveredIds.length > 0) {
+    await prisma.subscription.updateMany({
+      where: {
+        id: { in: recoveredIds },
+        status: SubscriptionStatus.AT_RISK,
+      },
+      data: { status: SubscriptionStatus.ACTIVE },
     });
   }
   if (alertsToCreate.length > 0) {
