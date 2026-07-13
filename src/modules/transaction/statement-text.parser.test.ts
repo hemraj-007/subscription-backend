@@ -52,6 +52,19 @@ test("signed credit lines are tagged CREDIT", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("same-day equal debit and credit transactions are both preserved", () => {
+  const txs = fromLines([
+    "06-May Trial Subscription -649 1,24,351",
+    "06-May Trial Subscription +649 1,25,000",
+  ]);
+
+  assert.equal(txs.length, 2);
+  assert.deepEqual(
+    txs.map((tx) => tx.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
+
 test("long reference numbers are not read as the amount", () => {
   const txs = fromLines(["10-May Ref 1234567890123 Amazon 299 1,20,000"]);
   const amazon = find(txs, "Amazon");
@@ -65,6 +78,7 @@ test("header tables distinguish debit and credit columns", () => {
     ["01/05/2026", "Salary", "", "48000", "125000"],
   ];
   const txs = parseTransactionsFromPdfContent("", rows);
+  assert.equal(txs.length, 2);
 
   const netflix = find(txs, "Netflix");
   assert.equal(netflix.amount, 649);
