@@ -452,7 +452,7 @@ function dedupeTransactions(transactions: ParsedTransaction[]): ParsedTransactio
   const unique: ParsedTransaction[] = [];
 
   for (const tx of transactions) {
-    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}`;
+    const key = `${tx.date.toISOString().slice(0, 10)}|${tx.merchant.toLowerCase()}|${tx.amount}|${tx.type}`;
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(tx);
@@ -482,7 +482,8 @@ export function parseTransactionsFromPdfContent(
       ? rows.map((row) => (row.length === 1 ? row[0] : row.join(" | ")))
       : text.split(/\r?\n/);
 
-  const fromLines = parseFromLines(lineSource, defaultYear);
+  const fromLines =
+    fromHeader.length > 0 ? [] : parseFromLines(lineSource, defaultYear);
   const merged = dedupeTransactions([
     ...fromHeader,
     ...fromCompact,
