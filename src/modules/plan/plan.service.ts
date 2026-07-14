@@ -95,7 +95,7 @@ export const planService = {
       return this.getPlanStatus(userId);
     }
 
-    if (!env.BILLING_DEV_MODE) {
+    if (!env.BILLING_DEV_MODE || env.NODE_ENV === "production") {
       const err = new Error("Payment integration coming soon. Contact support to upgrade.");
       (err as Error & { status?: number; code?: string }).status = 501;
       (err as Error & { code?: string }).code = "PAYMENT_NOT_CONFIGURED";
