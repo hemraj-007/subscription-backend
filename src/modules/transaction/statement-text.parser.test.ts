@@ -76,6 +76,22 @@ test("header tables distinguish debit and credit columns", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("same-day debit and credit with equal amount are both preserved", () => {
+  const rows = [
+    ["Date", "Description", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["03/05/2026", "Netflix", "", "649", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+  const netflixTxs = txs.filter((t) => t.merchant === "Netflix");
+
+  assert.equal(netflixTxs.length, 2);
+  assert.deepEqual(
+    netflixTxs.map((t) => t.type).sort(),
+    ["CREDIT", "DEBIT"]
+  );
+});
+
 test("compressed single-cell table rows parse like lines", () => {
   const rows = [
     [PERIOD],
