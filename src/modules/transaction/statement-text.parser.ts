@@ -7,10 +7,6 @@ const DATE_PATTERN =
 const DATE_AT_LINE_START =
   /^(\d{1,2}-[A-Za-z]{3,9})(?:-(\d{2,4}))?\b/i;
 
-/** First signed amount after the date — txn value; trailing values are often running balances. */
-const TXN_SIGNED_AMOUNT =
-  /([+-]\s*\d{1,3}(?:,\d{2,3})*(?:\.\d{2})?)/;
-
 /** Any money-like token: grouped (1,24,351 / 48,000) or plain digits, optional sign/decimals. */
 const MONEY_TOKEN = /[+-]?(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?/g;
 
@@ -193,15 +189,19 @@ function parseMerchantAndAmount(
   const trimmed = rest.trim();
   if (!trimmed) return null;
 
-  // Prefer an explicitly signed amount: it is the transaction value, while a
-  // trailing unsigned number is usually the running balance. By convention here
-  // a leading "-" is money out (DEBIT) and "+" is money in (CREDIT).
-  const signed = trimmed.match(TXN_SIGNED_AMOUNT);
-  if (signed && signed.index !== undefined) {
-    const amount = parseAmount(signed[1]);
-    const type: TransactionKind = signed[1].trim().startsWith("+") ? "CREDIT" : "DEBIT";
-    const merchant = trimmed.slice(0, signed.index).replace(/\s+/g, " ").trim();
-    if (amount > 0 && merchant) return { merchant, amount, type };
+  const amountInfo = findAmountInText(trimmed, "first");
+  if (amountInfo) {
+    const merchant = trimmed
+      .slice(0, amountInfo.index)
+      .replace(/\s+/g, " ")
+      .trim();
+    if (merchant) {
+      return {
+        merchant,
+        amount: amountInfo.amount,
+        type: amountInfo.type,
+      };
+    }
   }
 
   // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
@@ -240,7 +240,7 @@ function parseCompressedStatementLine(
 function findAmountInText(
   text: string,
   prefer: "first" | "last" = "first"
-): { amount: number; token: string } | null {
+): { amount: number; token: string; type: TransactionKind; index: number } | null {
   const matches = Array.from(text.matchAll(AMOUNT_PATTERN));
   if (matches.length === 0) return null;
 
@@ -251,10 +251,26 @@ function findAmountInText(
     const token = match[0] ?? "";
     const numeric = match[1] ?? token;
     const amount = parseAmount(numeric);
-    if (amount > 0) return { amount, token };
+    if (amount > 0) {
+      return {
+        amount,
+        token,
+        type: inferTypeFromAmountToken(token, numeric),
+        index: match.index ?? text.indexOf(token),
+      };
+    }
   }
 
   return null;
+}
+
+function inferTypeFromAmountToken(
+  token: string,
+  numeric: string
+): TransactionKind {
+  if (/\bCR\b/i.test(token)) return "CREDIT";
+  if (/\bDR\b/i.test(token)) return "DEBIT";
+  return numeric.trim().startsWith("+") ? "CREDIT" : "DEBIT";
 }
 
 function parseLineToTransaction(
@@ -287,7 +303,7 @@ function parseLineToTransaction(
       : afterDate.replace(amountInfo.token, "");
   const merchant = merchantSlice.replace(/\s+/g, " ").trim() || "Unknown";
 
-  return { merchant, amount: amountInfo.amount, type: "DEBIT", date };
+  return { merchant, amount: amountInfo.amount, type: amountInfo.type, date };
 }
 
 function findHeaderRowIndex(rows: string[][]): number {

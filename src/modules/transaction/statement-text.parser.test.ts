@@ -52,6 +52,20 @@ test("signed credit lines are tagged CREDIT", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("numeric-date signed credit lines are tagged CREDIT", () => {
+  const txs = fromLines(["01/05/2026 Salary Credit +48,000 1,25,000"]);
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
+test("CR suffix credit lines are tagged CREDIT", () => {
+  const txs = fromLines(["01/05/2026 Refund Amazon 649 CR 1,25,000"]);
+  const refund = find(txs, "Refund Amazon");
+  assert.equal(refund.amount, 649);
+  assert.equal(refund.type, "CREDIT");
+});
+
 test("long reference numbers are not read as the amount", () => {
   const txs = fromLines(["10-May Ref 1234567890123 Amazon 299 1,20,000"]);
   const amazon = find(txs, "Amazon");
