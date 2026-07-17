@@ -28,8 +28,34 @@ test("unused detection lookup normalizes raw transaction merchants", () => {
 
 test("at-risk subscriptions recover after recent debit activity resumes", async (t) => {
   const updates: any[] = [];
+  const subscriptionDelegate = prisma.subscription as unknown as {
+    findMany: any;
+    updateMany: any;
+  };
+  const transactionDelegate = prisma.transaction as unknown as {
+    groupBy: any;
+  };
+  const alertDelegate = prisma.alert as unknown as {
+    findMany: any;
+    createMany: any;
+  };
 
-  t.mock.method(prisma.subscription as any, "findMany", async (args: any) => {
+  const originals = {
+    subscriptionFindMany: subscriptionDelegate.findMany,
+    subscriptionUpdateMany: subscriptionDelegate.updateMany,
+    transactionGroupBy: transactionDelegate.groupBy,
+    alertFindMany: alertDelegate.findMany,
+    alertCreateMany: alertDelegate.createMany,
+  };
+  t.after(() => {
+    subscriptionDelegate.findMany = originals.subscriptionFindMany;
+    subscriptionDelegate.updateMany = originals.subscriptionUpdateMany;
+    transactionDelegate.groupBy = originals.transactionGroupBy;
+    alertDelegate.findMany = originals.alertFindMany;
+    alertDelegate.createMany = originals.alertCreateMany;
+  });
+
+  subscriptionDelegate.findMany = async (args: any) => {
     assert.deepEqual(args.where.status, {
       in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.AT_RISK],
     });
@@ -42,8 +68,8 @@ test("at-risk subscriptions recover after recent debit activity resumes", async 
         status: SubscriptionStatus.AT_RISK,
       },
     ];
-  });
-  t.mock.method(prisma.transaction as any, "groupBy", async (args: any) => {
+  };
+  transactionDelegate.groupBy = async (args: any) => {
     assert.equal(args.where.type, TransactionType.DEBIT);
     return [
       {
@@ -52,13 +78,13 @@ test("at-risk subscriptions recover after recent debit activity resumes", async 
         _max: { date: new Date() },
       },
     ];
-  });
-  t.mock.method(prisma.alert as any, "findMany", async () => []);
-  t.mock.method(prisma.subscription as any, "updateMany", async (args: any) => {
+  };
+  alertDelegate.findMany = async () => [];
+  subscriptionDelegate.updateMany = async (args: any) => {
     updates.push(args);
     return { count: 1 };
-  });
-  t.mock.method(prisma.alert as any, "createMany", async () => ({ count: 0 }));
+  };
+  alertDelegate.createMany = async () => ({ count: 0 });
 
   await detectUnusedSubscriptions("user-1");
 
