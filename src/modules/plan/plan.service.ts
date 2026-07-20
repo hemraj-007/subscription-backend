@@ -1,8 +1,10 @@
-import { Plan } from "@prisma/client";
+import { Plan, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { env } from "../../config/env";
 import { PLAN_LIMITS, PRO_FEATURES } from "./plan.constants";
 import { PlanLimitError } from "./plan.errors";
+
+type PlanDbClient = Pick<Prisma.TransactionClient, "user" | "creditCard">;
 
 const safeUserSelect = {
   id: true,
@@ -30,13 +32,13 @@ export const planService = {
     return user.plan;
   },
 
-  async getPlanStatus(userId: string) {
+  async getPlanStatus(userId: string, db: PlanDbClient = prisma) {
     const [user, cardCount] = await Promise.all([
-      prisma.user.findUnique({
+      db.user.findUnique({
         where: { id: userId },
         select: safeUserSelect,
       }),
-      prisma.creditCard.count({ where: { userId } }),
+      db.creditCard.count({ where: { userId } }),
     ]);
 
     if (!user) throw new Error("User not found");
@@ -62,8 +64,8 @@ export const planService = {
     };
   },
 
-  async assertCanAddCard(userId: string) {
-    const status = await this.getPlanStatus(userId);
+  async assertCanAddCard(userId: string, db: PlanDbClient = prisma) {
+    const status = await this.getPlanStatus(userId, db);
     if (!status.canAddCard) {
       throw new PlanLimitError(
         "Free plan allows 1 card. Upgrade to Pro for unlimited cards.",

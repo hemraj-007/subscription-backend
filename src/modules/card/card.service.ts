@@ -1,5 +1,15 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { planService } from "../plan/plan.service";
+
+const SERIALIZABLE_RETRIES = 3;
+
+function isSerializationConflict(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2034"
+  );
+}
 
 export const cardService = {
   async createCard(userId: string, data: {
@@ -7,16 +17,32 @@ export const cardService = {
     bankName?: string;
     network?: string;
   }) {
-    await planService.assertCanAddCard(userId);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await prisma.$transaction(
+          async (tx) => {
+            await planService.assertCanAddCard(userId, tx);
 
-    return prisma.creditCard.create({
-      data: {
-        userId,
-        last4: data.last4,
-        bankName: data.bankName,
-        network: data.network,
-      },
-    });
+            return tx.creditCard.create({
+              data: {
+                userId,
+                last4: data.last4,
+                bankName: data.bankName,
+                network: data.network,
+              },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+      } catch (error) {
+        if (
+          !isSerializationConflict(error) ||
+          attempt >= SERIALIZABLE_RETRIES
+        ) {
+          throw error;
+        }
+      }
+    }
   },
 
   async getCards(userId: string) {
