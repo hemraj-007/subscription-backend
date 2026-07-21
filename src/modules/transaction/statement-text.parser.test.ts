@@ -91,3 +91,14 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("wrapped merchant lines keep the signed transaction amount", () => {
+  const txs = fromLines([
+    "NETFLIX.COM BILLING",
+    "03-May -649 1,24,351",
+  ]);
+  const netflix = find(txs, "Netflix");
+
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+});
