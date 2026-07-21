@@ -201,7 +201,9 @@ function parseMerchantAndAmount(
     const amount = parseAmount(signed[1]);
     const type: TransactionKind = signed[1].trim().startsWith("+") ? "CREDIT" : "DEBIT";
     const merchant = trimmed.slice(0, signed.index).replace(/\s+/g, " ").trim();
-    if (amount > 0 && merchant) return { merchant, amount, type };
+    if (amount > 0) {
+      return { merchant: merchant || "Unknown", amount, type };
+    }
   }
 
   // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
