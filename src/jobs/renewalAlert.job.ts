@@ -1,5 +1,19 @@
 import { prisma } from "../config/prisma";
 
+type RenewalAlertIdentity = {
+  userId: string;
+  message: string;
+  scheduledAt: Date;
+};
+
+export function renewalAlertKey(alert: RenewalAlertIdentity): string {
+  return JSON.stringify([
+    alert.userId,
+    alert.scheduledAt.toISOString(),
+    alert.message,
+  ]);
+}
+
 export async function generateRenewalAlerts(userId?: string) {
   const subscriptions = await prisma.subscription.findMany({
     where: {
@@ -32,24 +46,27 @@ export async function generateRenewalAlerts(userId?: string) {
     },
     select: {
       userId: true,
+      message: true,
       scheduledAt: true,
     },
   });
 
   const existingKeys = new Set(
-    existingAlerts.map((alert) => `${alert.userId}:${alert.scheduledAt.toISOString()}`)
+    existingAlerts.map(renewalAlertKey)
   );
   const alertsToCreate = subscriptions
-    .filter((sub) => {
-      const key = `${sub.userId}:${sub.nextCharge!.toISOString()}`;
-      return !existingKeys.has(key);
-    })
     .map((sub) => ({
       userId: sub.userId,
       type: "RENEWAL" as const,
       message: `${sub.merchant} will charge ₹${sub.amount} soon`,
       scheduledAt: sub.nextCharge!,
-    }));
+    }))
+    .filter((alert) => {
+      const key = renewalAlertKey(alert);
+      if (existingKeys.has(key)) return false;
+      existingKeys.add(key);
+      return true;
+    });
 
   if (alertsToCreate.length === 0) return;
   await prisma.alert.createMany({ data: alertsToCreate });
