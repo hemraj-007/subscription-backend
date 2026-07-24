@@ -91,3 +91,61 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("ungrouped signed amounts are not truncated at 3 digits", () => {
+  const txs = fromLines(["10-May Salary Credit +48000 1,72,232"]);
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
+test("yearless DD-Mon dates stay inside a Dec-Jan statement period", () => {
+  const period = "Statement Period 01 Dec 2025 - 15 Jan 2026";
+  const txs = parseTransactionsFromPdfContent(
+    [period, "15-Dec Netflix Subscription -649 1,24,351", "01-Jan Spotify Premium -119 1,24,232"].join(
+      "\n"
+    ),
+    []
+  );
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(isoDay(netflix.date), "2025-12-15");
+
+  const spotify = find(txs, "Spotify");
+  assert.equal(isoDay(spotify.date), "2026-01-01");
+});
+
+test("Credit Limit columns are not imported as CREDIT transactions", () => {
+  const rows = [
+    ["Date", "Description", "Amount", "Credit Limit", "Balance"],
+    ["03/05/2026", "Netflix", "649", "200000", "124351"],
+    ["01/05/2026", "Payment Thank You", "5000", "200000", "119351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  assert.equal(txs.length, 2);
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  assert.equal(
+    txs.some((t) => t.amount === 200000),
+    false
+  );
+});
+
+test("Withdrawal/Deposit headers classify refunds as CREDIT", () => {
+  const rows = [
+    ["Date", "Description", "Withdrawal", "Deposit", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["01/05/2026", "Refund", "", "649", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.type, "DEBIT");
+  assert.equal(netflix.amount, 649);
+
+  const refund = find(txs, "Refund");
+  assert.equal(refund.type, "CREDIT");
+  assert.equal(refund.amount, 649);
+});

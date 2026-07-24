@@ -7,9 +7,13 @@ const DATE_PATTERN =
 const DATE_AT_LINE_START =
   /^(\d{1,2}-[A-Za-z]{3,9})(?:-(\d{2,4}))?\b/i;
 
-/** First signed amount after the date — txn value; trailing values are often running balances. */
+/**
+ * First signed amount after the date — txn value; trailing values are often
+ * running balances. Ungrouped amounts must allow 4+ digits (`+48000`), not just
+ * `\d{1,3}` which would truncate `+48000` to `+480`.
+ */
 const TXN_SIGNED_AMOUNT =
-  /([+-]\s*\d{1,3}(?:,\d{2,3})*(?:\.\d{2})?)/;
+  /([+-]\s*(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?)/;
 
 /** Any money-like token: grouped (1,24,351 / 48,000) or plain digits, optional sign/decimals. */
 const MONEY_TOKEN = /[+-]?(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?/g;
@@ -70,11 +74,38 @@ function normalizeHeader(value: string): string {
 
 function findColumnIndex(headers: string[], aliases: string[]): number {
   const normalized = headers.map(normalizeHeader);
+  // Prefer exact header matches so "Amount" wins over a later "Credit Limit"
+  // when both could fuzzy-match an alias like "credit".
+  for (const alias of aliases) {
+    const exact = normalized.indexOf(alias);
+    if (exact >= 0) return exact;
+  }
   for (let i = 0; i < normalized.length; i++) {
     const header = normalized[i];
+    // Account metadata columns often contain "credit"/"debit" as adjectives
+    // (e.g. "Credit Limit", "Available Credit") and must not be treated as
+    // transaction amount columns.
+    if (/\b(limit|available|card|score|interest)\b/.test(header)) continue;
     for (const alias of aliases) {
-      if (header === alias || header.includes(alias)) return i;
+      if (header.includes(alias)) return i;
     }
+  }
+  return -1;
+}
+
+/** Debit/credit ledger columns: exact labels only (never "Credit Limit"). */
+function findDebitCreditColumnIndex(
+  headers: string[],
+  kind: "debit" | "credit"
+): number {
+  const aliases =
+    kind === "debit"
+      ? ["debit amount", "debit", "withdrawal amount", "withdrawal"]
+      : ["credit amount", "credit", "deposit amount", "deposit"];
+  const normalized = headers.map(normalizeHeader);
+  for (const alias of aliases) {
+    const exact = normalized.indexOf(alias);
+    if (exact >= 0) return exact;
   }
   return -1;
 }
@@ -96,21 +127,72 @@ function parseAmount(raw: unknown): number {
   return abs;
 }
 
-function inferStatementYear(text: string): number {
+type StatementPeriod = {
+  defaultYear: number;
+  start?: Date;
+  end?: Date;
+};
+
+function inferStatementPeriod(text: string): StatementPeriod {
   const period = text.match(
     /statement\s+period[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))/i
   );
-  if (period) return Number(period[4] ?? period[2]);
+  if (period) {
+    const start = parseDateFromText(period[1]!.replace(/\s+/g, " "));
+    const end = parseDateFromText(period[3]!.replace(/\s+/g, " "));
+    const startOk = !Number.isNaN(start.getTime());
+    const endOk = !Number.isNaN(end.getTime());
+    return {
+      defaultYear: endOk
+        ? end.getUTCFullYear()
+        : startOk
+          ? start.getUTCFullYear()
+          : Number(period[4] ?? period[2]),
+      start: startOk ? start : undefined,
+      end: endOk ? end : undefined,
+    };
+  }
 
   const years = text.match(/\b(20\d{2})\b/g);
-  if (years?.length) return Number(years[years.length - 1]);
+  if (years?.length) {
+    return { defaultYear: Number(years[years.length - 1]) };
+  }
 
-  return new Date().getFullYear();
+  return { defaultYear: new Date().getFullYear() };
+}
+
+/**
+ * Yearless DD-Mon rows on statements that span Dec→Jan must land inside the
+ * statement period. Using only the period end year turns "15-Dec" into next
+ * December (after the statement ended).
+ */
+function resolveYearlessDate(
+  day: number,
+  month: number,
+  period: StatementPeriod
+): Date {
+  const candidates = [
+    period.defaultYear,
+    period.start?.getUTCFullYear(),
+    period.end?.getUTCFullYear(),
+    period.defaultYear - 1,
+    period.defaultYear + 1,
+  ].filter((y): y is number => typeof y === "number");
+  const years = [...new Set(candidates)];
+
+  if (period.start && period.end) {
+    for (const year of years) {
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date >= period.start && date <= period.end) return date;
+    }
+  }
+
+  return new Date(Date.UTC(period.defaultYear, month - 1, day));
 }
 
 function parseLeadingDate(
   line: string,
-  defaultYear: number
+  period: StatementPeriod
 ): { date: Date; rest: string } | null {
   const withYear = line.match(/^(\d{1,2}-[A-Za-z]{3,9}-\d{4})\b(.*)$/i);
   if (withYear) {
@@ -120,11 +202,19 @@ function parseLeadingDate(
     }
   }
 
-  const ddMon = line.match(/^(\d{1,2}-[A-Za-z]{3,9})\b(.*)$/i);
+  const ddMon = line.match(/^(\d{1,2})-([A-Za-z]{3,9})\b(.*)$/i);
   if (ddMon) {
-    const date = parseDateFromText(`${ddMon[1]}-${defaultYear}`);
-    if (!Number.isNaN(date.getTime())) {
-      return { date, rest: ddMon[2] ?? "" };
+    const monthNames = [
+      "jan", "feb", "mar", "apr", "may", "jun",
+      "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    const month = monthNames.indexOf(ddMon[2]!.slice(0, 3).toLowerCase()) + 1;
+    const day = Number(ddMon[1]);
+    if (month >= 1 && day >= 1 && day <= 31) {
+      const date = resolveYearlessDate(day, month, period);
+      if (!Number.isNaN(date.getTime())) {
+        return { date, rest: ddMon[3] ?? "" };
+      }
     }
   }
 
@@ -220,9 +310,9 @@ function parseMerchantAndAmount(
 
 function parseCompressedStatementLine(
   line: string,
-  defaultYear: number
+  period: StatementPeriod
 ): ParsedTransaction | null {
-  const leading = parseLeadingDate(line, defaultYear);
+  const leading = parseLeadingDate(line, period);
   if (!leading) return null;
 
   const parsed = parseMerchantAndAmount(leading.rest);
@@ -259,11 +349,11 @@ function findAmountInText(
 
 function parseLineToTransaction(
   line: string,
-  defaultYear: number
+  period: StatementPeriod
 ): ParsedTransaction | null {
   if (isSkippableLine(line)) return null;
 
-  const compressed = parseCompressedStatementLine(line, defaultYear);
+  const compressed = parseCompressedStatementLine(line, period);
   if (compressed) return compressed;
 
   const dateMatch = line.match(DATE_PATTERN);
@@ -318,7 +408,7 @@ function findAmountInRow(row: string[], skipIndexes: number[]): number {
 
 function parseFromCompactTableRows(
   rows: string[][],
-  defaultYear: number
+  period: StatementPeriod
 ): ParsedTransaction[] {
   const results: ParsedTransaction[] = [];
 
@@ -327,7 +417,7 @@ function parseFromCompactTableRows(
     if (cells.length < 2) continue;
 
     const joined = cells.join(" ");
-    const leading = parseLeadingDate(joined, defaultYear);
+    const leading = parseLeadingDate(joined, period);
     if (!leading) continue;
 
     const date = leading.date;
@@ -357,15 +447,15 @@ function parseFromCompactTableRows(
  */
 function parseFromHeaderTable(
   rows: string[][],
-  defaultYear: number
+  period: StatementPeriod
 ): ParsedTransaction[] {
   const headerIdx = findHeaderRowIndex(rows);
   if (headerIdx < 0) return [];
 
   const headers = rows[headerIdx];
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
-  const debitCol = findColumnIndex(headers, ["debit"]);
-  const creditCol = findColumnIndex(headers, ["credit"]);
+  const debitCol = findDebitCreditColumnIndex(headers, "debit");
+  const creditCol = findDebitCreditColumnIndex(headers, "credit");
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);
@@ -419,7 +509,7 @@ function parseFromHeaderTable(
   return results;
 }
 
-function parseFromLines(lines: string[], defaultYear: number): ParsedTransaction[] {
+function parseFromLines(lines: string[], period: StatementPeriod): ParsedTransaction[] {
   const results: ParsedTransaction[] = [];
   let pendingMerchant = "";
 
@@ -427,7 +517,7 @@ function parseFromLines(lines: string[], defaultYear: number): ParsedTransaction
     const line = rawLine.replace(/\s*\|\s*/g, " ").replace(/\s+/g, " ").trim();
     if (!line) continue;
 
-    const parsed = parseLineToTransaction(line, defaultYear);
+    const parsed = parseLineToTransaction(line, period);
     if (parsed) {
       if (pendingMerchant && parsed.merchant === "Unknown") {
         parsed.merchant = pendingMerchant;
@@ -465,24 +555,24 @@ export function parseTransactionsFromPdfContent(
   text: string,
   rows: string[][]
 ): ParsedTransaction[] {
-  const defaultYear = inferStatementYear(text);
+  const period = inferStatementPeriod(text);
 
   // Prefer an explicit header table: it is the only shape that reliably
   // distinguishes debit from credit columns. Listed first so its credit/debit
   // classification wins during dedupe over the column-agnostic parsers below.
-  const fromHeader = parseFromHeaderTable(rows, defaultYear);
+  const fromHeader = parseFromHeaderTable(rows, period);
 
   // The compact parser handles compressed single-cell rows (and signed amounts).
   // Skip it when a header table already produced rows to avoid DEBIT-tagging credits.
   const fromCompact =
-    fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, defaultYear);
+    fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, period);
 
   const lineSource =
     rows.length > 0
       ? rows.map((row) => (row.length === 1 ? row[0] : row.join(" | ")))
       : text.split(/\r?\n/);
 
-  const fromLines = parseFromLines(lineSource, defaultYear);
+  const fromLines = parseFromLines(lineSource, period);
   const merged = dedupeTransactions([
     ...fromHeader,
     ...fromCompact,
@@ -491,5 +581,5 @@ export function parseTransactionsFromPdfContent(
 
   if (merged.length > 0) return merged;
 
-  return dedupeTransactions(parseFromLines(text.split(/\r?\n/), defaultYear));
+  return dedupeTransactions(parseFromLines(text.split(/\r?\n/), period));
 }
