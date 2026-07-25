@@ -91,3 +91,53 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("numeric-date Opening/Closing Balance lines are not imported as DEBITs", () => {
+  const txs = fromLines([
+    "01/05/2026 Opening Balance 100000",
+    "03/05/2026 Netflix 649",
+    "31/05/2026 Closing Balance 99351",
+  ]);
+
+  assert.equal(txs.length, 1);
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  assert.equal(
+    txs.some((t) => /opening|closing/i.test(t.merchant)),
+    false
+  );
+});
+
+test("header tables do not re-import Opening/Closing Balance via line fallback", () => {
+  const rows = [
+    ["Date", "Description", "Debit", "Credit", "Balance"],
+    ["01/05/2026", "Opening Balance", "", "", "100000"],
+    ["03/05/2026", "Netflix", "649", "", "99351"],
+    ["31/05/2026", "Closing Balance", "", "", "99351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  assert.equal(txs.length, 1);
+  assert.equal(find(txs, "Netflix").amount, 649);
+  assert.equal(
+    txs.some((t) => /opening|closing/i.test(t.merchant)),
+    false
+  );
+});
+
+test("Running Total is not used as the transaction amount", () => {
+  const rows = [
+    ["Date", "Description", "Debit", "Credit", "Running Total"],
+    ["03/05/2026", "Service Fee", "", "", "100649"],
+    ["04/05/2026", "Netflix", "649", "", "101298"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  assert.equal(txs.length, 1);
+  assert.equal(find(txs, "Netflix").amount, 649);
+  assert.equal(
+    txs.some((t) => t.merchant.toLowerCase().includes("service")),
+    false
+  );
+});

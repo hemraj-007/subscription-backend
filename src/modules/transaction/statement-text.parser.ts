@@ -23,7 +23,20 @@ const AMOUNT_PATTERN =
 const SKIP_LINE_PATTERN =
   /\b(statement period|total debits|total credits|page \d+ of|account summary|available (?:credit )?limit|minimum (?:amount )?due|payment due|previous balance|brought forward|carried forward)\b/i;
 
-const SKIP_MERCHANT_PATTERN = /^(opening balance|closing balance)$/i;
+/** Ledger summary rows that are not real charges — skip across all parse paths. */
+const SKIP_MERCHANT_PATTERN =
+  /^(opening balance|closing balance|opening bal\.?|closing bal\.?|op\.?\s*balance|cl\.?\s*balance)$/i;
+
+/** Columns that hold running ledger totals, never the transaction amount. */
+const BALANCE_COLUMN_ALIASES = [
+  "balance",
+  "running total",
+  "running balance",
+  "outstanding",
+  "available balance",
+  "closing balance",
+  "opening balance",
+];
 
 const MERCHANT_COLUMN_ALIASES = [
   "merchant",
@@ -286,6 +299,9 @@ function parseLineToTransaction(
       ? afterDate.slice(0, amountIdx)
       : afterDate.replace(amountInfo.token, "");
   const merchant = merchantSlice.replace(/\s+/g, " ").trim() || "Unknown";
+  // Compressed DD-Mon path already skips these; numeric-date lines must too,
+  // otherwise Opening/Closing Balance rows become fake high-value DEBITs.
+  if (SKIP_MERCHANT_PATTERN.test(merchant)) return null;
 
   return { merchant, amount: amountInfo.amount, type: "DEBIT", date };
 }
@@ -304,16 +320,6 @@ function findHeaderRowIndex(rows: string[][]): number {
     if (hasDate && (hasAmount || hasMerchant)) return i;
   }
   return -1;
-}
-
-function findAmountInRow(row: string[], skipIndexes: number[]): number {
-  let best = 0;
-  for (let i = 0; i < row.length; i++) {
-    if (skipIndexes.includes(i)) continue;
-    const amount = parseAmount(row[i]);
-    if (amount > best) best = amount;
-  }
-  return best;
 }
 
 function parseFromCompactTableRows(
@@ -368,7 +374,7 @@ function parseFromHeaderTable(
   const creditCol = findColumnIndex(headers, ["credit"]);
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
-  const balanceCol = findColumnIndex(headers, ["balance"]);
+  const balanceCol = findColumnIndex(headers, BALANCE_COLUMN_ALIASES);
 
   if (dateCol < 0) return [];
 
@@ -395,10 +401,8 @@ function parseFromHeaderTable(
       if (amount > 0) type = "CREDIT";
     }
     if (amount <= 0 && amountCol >= 0) amount = parseAmount(row[amountCol]);
-    if (amount <= 0) {
-      const skip = [dateCol, merchantCol, balanceCol].filter((i) => i >= 0);
-      amount = findAmountInRow(row, skip);
-    }
+    // Do not fall back to the largest remaining cell: that cell is often a
+    // Running Total / Outstanding balance when debit/credit are empty.
     if (amount <= 0) continue;
 
     let merchant =
@@ -406,7 +410,11 @@ function parseFromHeaderTable(
     if (!merchant) {
       const parts = row.filter(
         (_, idx) =>
-          idx !== dateCol && idx !== debitCol && idx !== creditCol && idx !== balanceCol
+          idx !== dateCol &&
+          idx !== debitCol &&
+          idx !== creditCol &&
+          idx !== amountCol &&
+          idx !== balanceCol
       );
       merchant = compactRow(parts).join(" ").replace(/\s+/g, " ").trim();
     }
@@ -468,14 +476,28 @@ export function parseTransactionsFromPdfContent(
   const defaultYear = inferStatementYear(text);
 
   // Prefer an explicit header table: it is the only shape that reliably
-  // distinguishes debit from credit columns. Listed first so its credit/debit
-  // classification wins during dedupe over the column-agnostic parsers below.
+  // distinguishes debit from credit columns.
+  const headerIdx = findHeaderRowIndex(rows);
   const fromHeader = parseFromHeaderTable(rows, defaultYear);
 
+  // When the extract has a real ledger header (amount and/or balance columns),
+  // do not re-parse the same cells as free text. Joining "Service Fee | | | 100649"
+  // turns Running Total / Opening Balance into fake DEBIT amounts.
+  if (headerIdx >= 0) {
+    const headers = rows[headerIdx] ?? [];
+    const hasLedgerColumns =
+      findColumnIndex(headers, AMOUNT_COLUMN_ALIASES) >= 0 ||
+      findColumnIndex(headers, BALANCE_COLUMN_ALIASES) >= 0;
+    if (hasLedgerColumns) {
+      if (fromHeader.length > 0) return dedupeTransactions(fromHeader);
+      // Header present but every row was a balance/empty amount — avoid the
+      // cell-join fallback; plain extracted text may still have real txns.
+      return dedupeTransactions(parseFromLines(text.split(/\r?\n/), defaultYear));
+    }
+  }
+
   // The compact parser handles compressed single-cell rows (and signed amounts).
-  // Skip it when a header table already produced rows to avoid DEBIT-tagging credits.
-  const fromCompact =
-    fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, defaultYear);
+  const fromCompact = parseFromCompactTableRows(rows, defaultYear);
 
   const lineSource =
     rows.length > 0
@@ -484,7 +506,6 @@ export function parseTransactionsFromPdfContent(
 
   const fromLines = parseFromLines(lineSource, defaultYear);
   const merged = dedupeTransactions([
-    ...fromHeader,
     ...fromCompact,
     ...fromLines,
   ]);
