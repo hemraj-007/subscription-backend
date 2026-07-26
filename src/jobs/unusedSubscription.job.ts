@@ -1,7 +1,32 @@
-import { SubscriptionStatus } from "@prisma/client";
+import { SubscriptionStatus, TransactionType } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import { normalizeMerchant } from "../modules/subscription/merchant.normalizer";
 
 const INACTIVITY_DAYS = 30;
+
+type RecentTransaction = {
+  cardId: string;
+  merchant: string;
+  date: Date;
+};
+
+/**
+ * Builds cardId:normalizedMerchant → latest debit date.
+ * Subscriptions store normalized merchants; statement rows often do not.
+ */
+export function buildLastTxByCardMerchant(transactions: RecentTransaction[]) {
+  const lastTxByCardMerchant = new Map<string, Date>();
+
+  for (const transaction of transactions) {
+    const key = `${transaction.cardId}:${normalizeMerchant(transaction.merchant)}`;
+    const existing = lastTxByCardMerchant.get(key);
+    if (!existing || transaction.date > existing) {
+      lastTxByCardMerchant.set(key, transaction.date);
+    }
+  }
+
+  return lastTxByCardMerchant;
+}
 
 export async function detectUnusedSubscriptions(userId?: string) {
   const cutoff = new Date();
@@ -17,23 +42,23 @@ export async function detectUnusedSubscriptions(userId?: string) {
   if (subscriptions.length === 0) return;
 
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
-  const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
 
-  const txGroups = await prisma.transaction.groupBy({
-    by: ["cardId", "merchant"],
+  // Only recent DEBITs matter for "unused"; normalize merchants so raw
+  // statement descriptions still match subscription.merchant values.
+  const recentTransactions = await prisma.transaction.findMany({
     where: {
       cardId: { in: cardIds },
-      merchant: { in: merchants },
+      type: TransactionType.DEBIT,
+      date: { gte: cutoff },
     },
-    _max: { date: true },
+    select: {
+      cardId: true,
+      merchant: true,
+      date: true,
+    },
   });
 
-  const lastTxByCardMerchant = new Map<string, Date>();
-  for (const row of txGroups) {
-    if (row._max.date) {
-      lastTxByCardMerchant.set(`${row.cardId}:${row.merchant}`, row._max.date);
-    }
-  }
+  const lastTxByCardMerchant = buildLastTxByCardMerchant(recentTransactions);
 
   const existingUnusedAlerts = await prisma.alert.findMany({
     where: {
@@ -54,7 +79,7 @@ export async function detectUnusedSubscriptions(userId?: string) {
 
   for (const sub of subscriptions) {
     const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
-    if (!lastTxDate || lastTxDate < cutoff) {
+    if (!lastTxDate) {
       atRiskIds.push(sub.id);
       const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
       const key = `${sub.userId}:${message}`;
@@ -70,16 +95,25 @@ export async function detectUnusedSubscriptions(userId?: string) {
     }
   }
 
+  // Status flip + alert insert must be atomic. Otherwise a failure after
+  // updateMany leaves subscriptions AT_RISK; the next run only loads ACTIVE
+  // rows, so UNUSED alerts are lost permanently.
+  const ops = [];
   if (atRiskIds.length > 0) {
-    await prisma.subscription.updateMany({
-      where: {
-        id: { in: atRiskIds },
-        status: SubscriptionStatus.ACTIVE,
-      },
-      data: { status: SubscriptionStatus.AT_RISK },
-    });
+    ops.push(
+      prisma.subscription.updateMany({
+        where: {
+          id: { in: atRiskIds },
+          status: SubscriptionStatus.ACTIVE,
+        },
+        data: { status: SubscriptionStatus.AT_RISK },
+      })
+    );
   }
   if (alertsToCreate.length > 0) {
-    await prisma.alert.createMany({ data: alertsToCreate });
+    ops.push(prisma.alert.createMany({ data: alertsToCreate }));
+  }
+  if (ops.length > 0) {
+    await prisma.$transaction(ops);
   }
 }
