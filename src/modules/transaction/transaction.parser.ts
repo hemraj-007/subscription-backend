@@ -199,8 +199,17 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           amount = credit;
           type = "CREDIT";
         } else if (generic > 0) {
-          // A leading "-" or parenthesis in a single amount column means money in.
-          type = /^\s*[-(]/.test(rawGeneric) ? "CREDIT" : "DEBIT";
+          // Bank CSV exports often use a trailing CR/DR marker. Prefer that
+          // over sign heuristics — "500.00 CR" is money in, not a debit.
+          if (/\bCR\b/i.test(rawGeneric)) {
+            type = "CREDIT";
+          } else if (/\bDR\b/i.test(rawGeneric)) {
+            type = "DEBIT";
+          } else {
+            // In signed amount columns, "+" is money in; negative,
+            // parenthesized, and unsigned values are money out.
+            type = /^\s*\+/.test(rawGeneric) ? "CREDIT" : "DEBIT";
+          }
         }
 
         const date = parseDate(row[dateKey] ?? row.date);
