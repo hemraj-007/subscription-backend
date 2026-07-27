@@ -19,10 +19,29 @@ export async function detectUnusedSubscriptions(userId?: string) {
   const cardIds = Array.from(new Set(subscriptions.map((sub) => sub.cardId)));
   const merchants = Array.from(new Set(subscriptions.map((sub) => sub.merchant)));
 
+  // Absence of a merchant charge is only meaningful when the card has *some*
+  // recent activity in our dataset. Credit-card statements are usually for a
+  // past billing period; uploading last month's PDF must not mark every
+  // detected subscription unused simply because all charges are older than
+  // INACTIVITY_DAYS relative to wall-clock now.
+  const recentCardActivity = await prisma.transaction.groupBy({
+    by: ["cardId"],
+    where: {
+      cardId: { in: cardIds },
+      date: { gte: cutoff },
+    },
+    _count: { _all: true },
+  });
+  const cardsWithRecentData = new Set(
+    recentCardActivity.map((row) => row.cardId)
+  );
+
+  if (cardsWithRecentData.size === 0) return;
+
   const txGroups = await prisma.transaction.groupBy({
     by: ["cardId", "merchant"],
     where: {
-      cardId: { in: cardIds },
+      cardId: { in: Array.from(cardsWithRecentData) },
       merchant: { in: merchants },
     },
     _max: { date: true },
@@ -53,6 +72,8 @@ export async function detectUnusedSubscriptions(userId?: string) {
   const alertsToCreate: { userId: string; type: "UNUSED"; message: string; scheduledAt: Date }[] = [];
 
   for (const sub of subscriptions) {
+    if (!cardsWithRecentData.has(sub.cardId)) continue;
+
     const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
     if (!lastTxDate || lastTxDate < cutoff) {
       atRiskIds.push(sub.id);
