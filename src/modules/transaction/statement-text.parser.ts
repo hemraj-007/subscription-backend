@@ -187,6 +187,25 @@ function isSkippableLine(line: string): boolean {
   return false;
 }
 
+/**
+ * Pick the transaction amount from unsigned money tokens on a statement line.
+ *
+ * Common shapes:
+ * - "Netflix 649" → single token
+ * - "Netflix 649 1,24,351" → txn + running balance (use first)
+ * - "NETFLIX AUTH 884512 649 1,20,000" → ref + txn + balance (use penultimate)
+ *
+ * With 3+ positive tokens the last is almost always the running balance and a
+ * middle integer is often an auth/UPI/reference id — not currency.
+ */
+function pickUnsignedAmountToken<T extends { amount: number }>(
+  tokens: T[]
+): T | null {
+  if (tokens.length === 0) return null;
+  if (tokens.length >= 3) return tokens[tokens.length - 2] ?? null;
+  return tokens[0] ?? null;
+}
+
 function parseMerchantAndAmount(
   rest: string
 ): { merchant: string; amount: number; type: TransactionKind } | null {
@@ -204,18 +223,20 @@ function parseMerchantAndAmount(
     if (amount > 0 && merchant) return { merchant, amount, type };
   }
 
-  // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
-  // first money-like token as the transaction value (balance, if any, trails it).
-  const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN));
-  for (const token of tokens) {
+  // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351").
+  const positiveTokens: { token: string; amount: number; index: number }[] = [];
+  for (const token of trimmed.matchAll(MONEY_TOKEN)) {
     if (token.index === undefined) continue;
     const amount = parseAmount(token[0]);
     if (amount <= 0) continue;
-    const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
-    if (merchant) return { merchant, amount, type: "DEBIT" };
+    positiveTokens.push({ token: token[0], amount, index: token.index });
   }
 
-  return null;
+  const chosen = pickUnsignedAmountToken(positiveTokens);
+  if (!chosen) return null;
+  const merchant = trimmed.slice(0, chosen.index).replace(/\s+/g, " ").trim();
+  if (!merchant) return null;
+  return { merchant, amount: chosen.amount, type: "DEBIT" };
 }
 
 function parseCompressedStatementLine(
@@ -239,10 +260,21 @@ function parseCompressedStatementLine(
 
 function findAmountInText(
   text: string,
-  prefer: "first" | "last" = "first"
+  prefer: "first" | "last" | "txn" = "first"
 ): { amount: number; token: string } | null {
   const matches = Array.from(text.matchAll(AMOUNT_PATTERN));
   if (matches.length === 0) return null;
+
+  if (prefer === "txn") {
+    const positive: { amount: number; token: string }[] = [];
+    for (const match of matches) {
+      const token = match[0] ?? "";
+      const numeric = match[1] ?? token;
+      const amount = parseAmount(numeric);
+      if (amount > 0) positive.push({ amount, token });
+    }
+    return pickUnsignedAmountToken(positive);
+  }
 
   const ordered =
     prefer === "first" ? matches : [...matches].reverse();
@@ -276,8 +308,8 @@ function parseLineToTransaction(
   const afterDate =
     dateIdx >= 0 ? line.slice(dateIdx + dateMatch[0].length).trim() : line;
 
-  // First amount after the date is usually the txn; trailing values are often balances.
-  const amountInfo = findAmountInText(afterDate, "first");
+  // Prefer txn amount over auth/ref ids and trailing running balances.
+  const amountInfo = findAmountInText(afterDate, "txn");
   if (!amountInfo) return null;
 
   const amountIdx = afterDate.indexOf(amountInfo.token);
