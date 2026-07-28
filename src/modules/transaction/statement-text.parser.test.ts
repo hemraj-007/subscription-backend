@@ -91,3 +91,31 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("unsigned lines do not treat mid-line auth/ref numbers as the amount", () => {
+  const txs = fromLines([
+    "10-May NETFLIX.COM/BILL AUTH 884512 649.00 1,20,000.00",
+    "11-May UPI/123456/AmazonPay 299 1,19,701",
+  ]);
+
+  const netflix = find(txs, "NETFLIX");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  assert.match(netflix.merchant, /884512/);
+
+  const amazon = find(txs, "UPI");
+  assert.equal(amazon.amount, 299);
+  assert.equal(
+    txs.some((t) => t.amount === 884512 || t.amount === 123456),
+    false
+  );
+});
+
+test("numeric-date unsigned lines skip auth ids the same way", () => {
+  const txs = fromLines([
+    "10/05/2026 NETFLIX AUTHPOS 884512 649 120000",
+  ]);
+  const netflix = find(txs, "NETFLIX");
+  assert.equal(netflix.amount, 649);
+  assert.equal(isoDay(netflix.date), "2026-05-10");
+});
