@@ -96,6 +96,24 @@ function parseAmount(raw: unknown): number {
   return abs;
 }
 
+/**
+ * Infer DEBIT/CREDIT from amount text. Indian bank PDFs often mark direction
+ * with a trailing CR/DR (or Cr/Dr) rather than a leading +/- sign.
+ * `afterAmount` is the text immediately following the amount token.
+ */
+function inferTransactionType(
+  amountToken: string,
+  afterAmount: string = ""
+): TransactionKind {
+  const token = amountToken.trim();
+  const after = afterAmount.trim();
+  if (/\bCR\b/i.test(token) || /^CR\b/i.test(after)) return "CREDIT";
+  if (/\bDR\b/i.test(token) || /^DR\b/i.test(after)) return "DEBIT";
+  if (/^\+/.test(token)) return "CREDIT";
+  if (/^-/.test(token)) return "DEBIT";
+  return "DEBIT";
+}
+
 function inferStatementYear(text: string): number {
   const period = text.match(
     /statement\s+period[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))[^\d]{0,40}(\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2}))/i
@@ -199,20 +217,29 @@ function parseMerchantAndAmount(
   const signed = trimmed.match(TXN_SIGNED_AMOUNT);
   if (signed && signed.index !== undefined) {
     const amount = parseAmount(signed[1]);
-    const type: TransactionKind = signed[1].trim().startsWith("+") ? "CREDIT" : "DEBIT";
+    const afterSigned = trimmed.slice(signed.index + signed[0].length);
+    const type = inferTransactionType(signed[1], afterSigned);
     const merchant = trimmed.slice(0, signed.index).replace(/\s+/g, " ").trim();
     if (amount > 0 && merchant) return { merchant, amount, type };
   }
 
   // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
   // first money-like token as the transaction value (balance, if any, trails it).
+  // Also honor trailing CR/DR markers ("Payment 5000.00 CR").
   const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN));
   for (const token of tokens) {
     if (token.index === undefined) continue;
     const amount = parseAmount(token[0]);
     if (amount <= 0) continue;
     const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
-    if (merchant) return { merchant, amount, type: "DEBIT" };
+    if (merchant) {
+      const after = trimmed.slice(token.index + token[0].length);
+      return {
+        merchant,
+        amount,
+        type: inferTransactionType(token[0], after),
+      };
+    }
   }
 
   return null;
@@ -286,8 +313,13 @@ function parseLineToTransaction(
       ? afterDate.slice(0, amountIdx)
       : afterDate.replace(amountInfo.token, "");
   const merchant = merchantSlice.replace(/\s+/g, " ").trim() || "Unknown";
+  const afterAmount =
+    amountIdx >= 0
+      ? afterDate.slice(amountIdx + amountInfo.token.length)
+      : "";
+  const type = inferTransactionType(amountInfo.token, afterAmount);
 
-  return { merchant, amount: amountInfo.amount, type: "DEBIT", date };
+  return { merchant, amount: amountInfo.amount, type, date };
 }
 
 function findHeaderRowIndex(rows: string[][]): number {
@@ -394,7 +426,11 @@ function parseFromHeaderTable(
       amount = parseAmount(row[creditCol]);
       if (amount > 0) type = "CREDIT";
     }
-    if (amount <= 0 && amountCol >= 0) amount = parseAmount(row[amountCol]);
+    if (amount <= 0 && amountCol >= 0) {
+      const rawAmount = String(row[amountCol] ?? "");
+      amount = parseAmount(rawAmount);
+      if (amount > 0) type = inferTransactionType(rawAmount);
+    }
     if (amount <= 0) {
       const skip = [dateCol, merchantCol, balanceCol].filter((i) => i >= 0);
       amount = findAmountInRow(row, skip);
