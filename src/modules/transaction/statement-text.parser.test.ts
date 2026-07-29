@@ -91,3 +91,55 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("trailing CR/DR markers set transaction direction on unsigned lines", () => {
+  const txs = fromLines([
+    "01-May Payment Received 5000.00 CR 1,25,000",
+    "03-May Netflix Subscription 649.00 DR 1,24,351",
+    "05-May UPI Refund Amazon 299.00CR 1,24,650",
+  ]);
+
+  const payment = find(txs, "Payment");
+  assert.equal(payment.amount, 5000);
+  assert.equal(payment.type, "CREDIT");
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+
+  const refund = find(txs, "Amazon");
+  assert.equal(refund.amount, 299);
+  assert.equal(refund.type, "CREDIT");
+});
+
+test("numeric-date free-text lines honor trailing CR markers", () => {
+  const txs = fromLines([
+    "01/05/2026 NEFT Salary Credit 48000.00 CR",
+    "03/05/2026 Spotify Premium 119.00 DR",
+  ]);
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+
+  const spotify = find(txs, "Spotify");
+  assert.equal(spotify.amount, 119);
+  assert.equal(spotify.type, "DEBIT");
+});
+
+test("single Amount column with CR/DR suffix is classified correctly", () => {
+  const rows = [
+    ["Date", "Description", "Amount", "Balance"],
+    ["01/05/2026", "Salary Credit", "48000 CR", "125000"],
+    ["03/05/2026", "Netflix", "649 DR", "124351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+});
