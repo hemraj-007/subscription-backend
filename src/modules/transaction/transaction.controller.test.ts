@@ -3,9 +3,16 @@ import assert from "node:assert/strict";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { transactionController } from "./transaction.controller";
-import { AuthRequest } from "../../middlewares/auth.middleware";
-import { Response } from "express";
+import type { Response } from "express";
+import type { AuthRequest } from "../../middlewares/auth.middleware";
+
+// Controller imports pull in prisma/env; set placeholders before requiring.
+process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/test";
+process.env.JWT_SECRET ??= "test-secret";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { transactionController } =
+  require("./transaction.controller") as typeof import("./transaction.controller");
 
 async function withTempUpload(
   run: (filePath: string) => Promise<void>
