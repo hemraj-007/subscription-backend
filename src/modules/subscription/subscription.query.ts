@@ -19,5 +19,5 @@ export async function resolveCardIdsForUser(
 ): Promise<string[] | undefined> {
   if (!requested?.length) return undefined;
   const owned = await cardService.filterOwnedCardIds(userId, requested);
-  return owned.length > 0 ? owned : undefined;
+  return owned;
 }

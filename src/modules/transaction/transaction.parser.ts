@@ -199,8 +199,9 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           amount = credit;
           type = "CREDIT";
         } else if (generic > 0) {
-          // A leading "-" or parenthesis in a single amount column means money in.
-          type = /^\s*[-(]/.test(rawGeneric) ? "CREDIT" : "DEBIT";
+          // Match the app contract: DEBIT is money out, CREDIT is money in.
+          // For a generic signed amount column, "+" is the only reliable credit signal.
+          type = /^\s*\+/.test(rawGeneric) ? "CREDIT" : "DEBIT";
         }
 
         const date = parseDate(row[dateKey] ?? row.date);
