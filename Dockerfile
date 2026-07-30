@@ -9,10 +9,10 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl \
   && rm -rf /var/lib/apt/lists/*
 
+COPY prisma ./prisma
 COPY package*.json ./
 RUN npm ci
 
-COPY prisma ./prisma
 RUN npx prisma generate
 
 COPY tsconfig.json ./
