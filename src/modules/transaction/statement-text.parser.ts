@@ -204,18 +204,60 @@ function parseMerchantAndAmount(
     if (amount > 0 && merchant) return { merchant, amount, type };
   }
 
-  // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
-  // first money-like token as the transaction value (balance, if any, trails it).
-  const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN));
-  for (const token of tokens) {
-    if (token.index === undefined) continue;
-    const amount = parseAmount(token[0]);
-    if (amount <= 0) continue;
-    const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
-    if (merchant) return { merchant, amount, type: "DEBIT" };
+  // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"). Product
+  // names often embed digits ("MICROSOFT 365", "100GB") that must not win over
+  // the real charge amount.
+  const token = pickUnsignedAmountToken(trimmed);
+  if (!token || token.index === undefined) return null;
+  const amount = parseAmount(token[0]);
+  if (amount <= 0) return null;
+  const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
+  if (!merchant) return null;
+  return { merchant, amount, type: "DEBIT" };
+}
+
+/**
+ * Chooses the transaction amount token from an unsigned free-text remainder.
+ * Prefers decimal amounts, skips storage/product suffixes (100GB) and known
+ * product codes (Office/Microsoft 365), and treats a trailing comma-grouped
+ * value as a running balance.
+ */
+function pickUnsignedAmountToken(trimmed: string): RegExpMatchArray | null {
+  const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN)).filter((token) => {
+    if (token.index === undefined) return false;
+    if (parseAmount(token[0]) <= 0) return false;
+
+    // "100GB" / "50GB" — digit run is a size label, not the charge.
+    const after = trimmed[token.index + token[0].length];
+    if (after && /[A-Za-z]/.test(after)) return false;
+
+    // "MICROSOFT 365" / "Office 365" — product edition, not ₹365.
+    const merchantBefore = trimmed.slice(0, token.index);
+    if (
+      /^365(?:\.0+)?$/.test(token[0]) &&
+      /(?:microsoft|office|msft)\s*$/i.test(merchantBefore)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
+  if (tokens.length === 0) return null;
+  if (tokens.length === 1) return tokens[0]!;
+
+  const withDecimal = tokens.find((token) =>
+    /\.\d{1,2}$/.test(token[0]!.replace(/^[+-]/, ""))
+  );
+  if (withDecimal) return withDecimal;
+
+  const last = tokens[tokens.length - 1]!;
+  // Trailing Indian/Western grouped balance (e.g. 1,24,351 or 12,435.10).
+  if (last[0]!.includes(",")) {
+    return tokens[tokens.length - 2] ?? last;
   }
 
-  return null;
+  return tokens[0]!;
 }
 
 function parseCompressedStatementLine(
@@ -276,7 +318,19 @@ function parseLineToTransaction(
   const afterDate =
     dateIdx >= 0 ? line.slice(dateIdx + dateMatch[0].length).trim() : line;
 
-  // First amount after the date is usually the txn; trailing values are often balances.
+  // Reuse signed/unsigned amount selection so product codes (365, 100GB) and
+  // trailing balances are handled consistently with the compressed-line path.
+  const parsed = parseMerchantAndAmount(afterDate);
+  if (parsed) {
+    return {
+      merchant: parsed.merchant,
+      amount: parsed.amount,
+      type: parsed.type,
+      date,
+    };
+  }
+
+  // Fallback for lines where the amount precedes a usable merchant token.
   const amountInfo = findAmountInText(afterDate, "first");
   if (!amountInfo) return null;
 

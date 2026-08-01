@@ -91,3 +91,37 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("Microsoft/Office 365 product codes are not treated as the charge amount", () => {
+  const txs = fromLines([
+    "03-May MICROSOFT 365 619.00",
+    "05-May Office 365 699",
+  ]);
+
+  const microsoft = find(txs, "MICROSOFT");
+  assert.equal(microsoft.amount, 619);
+  assert.match(microsoft.merchant, /365/i);
+
+  const office = find(txs, "Office");
+  assert.equal(office.amount, 699);
+  assert.match(office.merchant, /365/i);
+});
+
+test("storage size labels like 100GB are not treated as the charge amount", () => {
+  const txs = fromLines([
+    "04-May Google One 100GB 130",
+    "05-May Apple iCloud 50GB 75.00",
+  ]);
+
+  const google = find(txs, "Google One");
+  assert.equal(google.amount, 130);
+
+  const icloud = find(txs, "iCloud");
+  assert.equal(icloud.amount, 75);
+});
+
+test("unsigned amount plus comma-grouped balance still uses the charge amount", () => {
+  const txs = fromLines(["06-May Netflix Subscription 649 1,24,351"]);
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+});
