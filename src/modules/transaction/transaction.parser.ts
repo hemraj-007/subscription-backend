@@ -96,16 +96,31 @@ function fullYear(raw: string): number {
 }
 
 /**
+ * Bank CSV exports often include a posting time (`02/05/2026 10:00:00`). Strip
+ * it so day-first numeric parsing still applies — otherwise we fall through to
+ * `new Date()`, which reads ambiguous dates as month-first and rejects valid
+ * day-first dates like `13/05/2026 10:00`.
+ */
+function stripTrailingTime(s: string): string {
+  return s
+    .replace(
+      /[T\s]+\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:\s*(?:Z|[+-]\d{2}:?\d{2}))?\s*$/i,
+      ""
+    )
+    .trim();
+}
+
+/**
  * Parses statement dates without timezone drift. Bank/CSV exports are almost
  * always day-first (DD/MM/YYYY, DD-MM-YYYY, DD-Mon-YYYY); `new Date("02-05-2026")`
  * would wrongly read that as month-first (May -> Feb). We disambiguate explicitly.
  */
 function parseDate(raw: unknown): Date {
   if (raw === undefined || raw === null || raw === "") return new Date(NaN);
-  const s = String(raw).trim();
+  const s = stripTrailingTime(String(raw).trim());
   if (!s) return new Date(NaN);
 
-  // ISO: YYYY-MM-DD (optionally with a time component).
+  // ISO: YYYY-MM-DD (optionally with a time component already stripped above).
   const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (iso) return utcDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
 
@@ -114,7 +129,7 @@ function parseDate(raw: unknown): Date {
   if (numeric) {
     const a = Number(numeric[1]);
     const b = Number(numeric[2]);
-    const year = fullYear(numeric[3]);
+    const year = fullYear(numeric[3]!);
     let day = a;
     let month = b;
     if (a > 12 && b <= 12) {
@@ -130,15 +145,15 @@ function parseDate(raw: unknown): Date {
   // DD-Mon-YYYY / "DD Mon YYYY" (e.g. 02-May-2026, 2 May 26).
   const dMon = s.match(/^(\d{1,2})[\s\-]+([A-Za-z]{3,9})[\s\-,]+(\d{2,4})$/);
   if (dMon) {
-    const month = MONTH_NAMES.indexOf(dMon[2].slice(0, 3).toLowerCase()) + 1;
-    if (month >= 1) return utcDate(fullYear(dMon[3]), month, Number(dMon[1]));
+    const month = MONTH_NAMES.indexOf(dMon[2]!.slice(0, 3).toLowerCase()) + 1;
+    if (month >= 1) return utcDate(fullYear(dMon[3]!), month, Number(dMon[1]));
   }
 
   // "Mon DD, YYYY" (e.g. May 2, 2026).
   const monD = s.match(/^([A-Za-z]{3,9})[\s\-]+(\d{1,2})[\s\-,]+(\d{2,4})$/);
   if (monD) {
-    const month = MONTH_NAMES.indexOf(monD[1].slice(0, 3).toLowerCase()) + 1;
-    if (month >= 1) return utcDate(fullYear(monD[3]), month, Number(monD[2]));
+    const month = MONTH_NAMES.indexOf(monD[1]!.slice(0, 3).toLowerCase()) + 1;
+    if (month >= 1) return utcDate(fullYear(monD[3]!), month, Number(monD[2]));
   }
 
   // Last resort: let JS parse, then pin to UTC midnight to avoid tz drift.
