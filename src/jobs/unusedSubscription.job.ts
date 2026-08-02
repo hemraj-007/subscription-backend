@@ -1,11 +1,13 @@
 import { SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../config/prisma";
-
-const INACTIVITY_DAYS = 30;
+import {
+  UNUSED_INACTIVITY_DAYS,
+  unusedAlertMessage,
+} from "../modules/alert/alert.messages";
 
 export async function detectUnusedSubscriptions(userId?: string) {
   const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - INACTIVITY_DAYS);
+  cutoff.setDate(cutoff.getDate() - UNUSED_INACTIVITY_DAYS);
 
   const subscriptions = await prisma.subscription.findMany({
     where: {
@@ -56,7 +58,7 @@ export async function detectUnusedSubscriptions(userId?: string) {
     const lastTxDate = lastTxByCardMerchant.get(`${sub.cardId}:${sub.merchant}`);
     if (!lastTxDate || lastTxDate < cutoff) {
       atRiskIds.push(sub.id);
-      const message = `You haven't used ${sub.merchant} in ${INACTIVITY_DAYS} days`;
+      const message = unusedAlertMessage(sub.merchant);
       const key = `${sub.userId}:${message}`;
       if (!existingUnusedAlertKeys.has(key)) {
         alertsToCreate.push({

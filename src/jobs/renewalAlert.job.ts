@@ -1,4 +1,5 @@
 import { prisma } from "../config/prisma";
+import { renewalAlertMessage } from "../modules/alert/alert.messages";
 
 export async function generateRenewalAlerts(userId?: string) {
   const subscriptions = await prisma.subscription.findMany({
@@ -47,7 +48,7 @@ export async function generateRenewalAlerts(userId?: string) {
     .map((sub) => ({
       userId: sub.userId,
       type: "RENEWAL" as const,
-      message: `${sub.merchant} will charge ₹${sub.amount} soon`,
+      message: renewalAlertMessage(sub.merchant, sub.amount),
       scheduledAt: sub.nextCharge!,
     }));
 

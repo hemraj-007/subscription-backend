@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma";
 import { planService } from "../plan/plan.service";
+import { alertsToDeleteAfterCardRemoval } from "../alert/alert.messages";
 
 export const cardService = {
   async createCard(userId: string, data: {
@@ -43,11 +44,50 @@ export const cardService = {
 
     // Transactions and subscriptions reference the card via required FKs, so
     // remove them first (atomically) before deleting the card itself.
-    await prisma.$transaction([
-      prisma.subscription.deleteMany({ where: { cardId, userId } }),
-      prisma.transaction.deleteMany({ where: { cardId } }),
-      prisma.creditCard.delete({ where: { id: cardId } }),
-    ]);
+    // Alerts have no card/subscription FK — delete only those that become
+    // stale after this card's subscriptions are gone (otherwise orphans keep
+    // showing ghost renewals and suppress later same-timestamp alerts).
+    await prisma.$transaction(async (tx) => {
+      const deletedSubs = await tx.subscription.findMany({
+        where: { cardId, userId },
+        select: { merchant: true, amount: true, nextCharge: true },
+      });
+
+      await tx.subscription.deleteMany({ where: { cardId, userId } });
+      await tx.transaction.deleteMany({ where: { cardId } });
+      await tx.creditCard.delete({ where: { id: cardId } });
+
+      if (deletedSubs.length === 0) return;
+
+      const merchants = Array.from(
+        new Set(deletedSubs.map((sub) => sub.merchant))
+      );
+      const remainingSubs = await tx.subscription.findMany({
+        where: { userId, merchant: { in: merchants } },
+        select: {
+          merchant: true,
+          amount: true,
+          nextCharge: true,
+          status: true,
+        },
+      });
+
+      const staleAlerts = alertsToDeleteAfterCardRemoval(
+        deletedSubs,
+        remainingSubs
+      );
+
+      for (const alert of staleAlerts) {
+        await tx.alert.deleteMany({
+          where: {
+            userId,
+            type: alert.type,
+            message: alert.message,
+            ...(alert.scheduledAt ? { scheduledAt: alert.scheduledAt } : {}),
+          },
+        });
+      }
+    });
 
     return { count: 1 };
   },
