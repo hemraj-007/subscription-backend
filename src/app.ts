@@ -7,6 +7,11 @@ import routes from "./routes";
 
 const app = express();
 
+// Vercel / Railway (and similar) terminate TLS and forward via one reverse proxy.
+// Without this, req.ip is the proxy address for every client, so auth/API rate
+// limits become a single shared bucket and lock out the whole deployment.
+app.set("trust proxy", 1);
+
 app.use(helmet());
 
 const allowedOrigins = env.ALLOWED_ORIGINS
