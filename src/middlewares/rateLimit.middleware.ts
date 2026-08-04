@@ -16,4 +16,10 @@ export const apiRateLimiter = rateLimit({
   message: { message: "Too many requests; try again later." },
   standardHeaders: true,
   legacyHeaders: false,
+  // Cron is authenticated via CRON_SECRET; never let shared traffic starve
+  // renewal/unused alert generation (mounted under /api → path is /jobs/run).
+  skip: (req) => {
+    const path = req.path || "";
+    return path === "/jobs/run" || path.endsWith("/jobs/run");
+  },
 });
