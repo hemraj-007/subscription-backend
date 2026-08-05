@@ -70,12 +70,23 @@ function normalizeHeader(value: string): string {
 
 function findColumnIndex(headers: string[], aliases: string[]): number {
   const normalized = headers.map(normalizeHeader);
-  for (let i = 0; i < normalized.length; i++) {
-    const header = normalized[i];
-    for (const alias of aliases) {
-      if (header === alias || header.includes(alias)) return i;
-    }
+
+  // Prefer exact header equality first so specific columns win over short
+  // aliases. Iterating headers-first with includes() made "Card Name" /
+  // "Bank Name" steal the merchant column from "Description" / "Narration"
+  // because both match the alias "name".
+  for (const alias of aliases) {
+    const exact = normalized.findIndex((header) => header === alias);
+    if (exact >= 0) return exact;
   }
+
+  for (const alias of aliases) {
+    // "name" is too ambiguous for substring matching (card name, bank name).
+    if (alias === "name") continue;
+    const fuzzy = normalized.findIndex((header) => header.includes(alias));
+    if (fuzzy >= 0) return fuzzy;
+  }
+
   return -1;
 }
 
@@ -468,14 +479,18 @@ export function parseTransactionsFromPdfContent(
   const defaultYear = inferStatementYear(text);
 
   // Prefer an explicit header table: it is the only shape that reliably
-  // distinguishes debit from credit columns. Listed first so its credit/debit
-  // classification wins during dedupe over the column-agnostic parsers below.
+  // distinguishes debit from credit columns.
   const fromHeader = parseFromHeaderTable(rows, defaultYear);
 
+  // When a header table already produced rows, do not re-parse the same cells
+  // as free text. Joining "Visa Platinum | Netflix | 649" creates duplicate
+  // merchants and can flip CREDIT rows back to DEBIT.
+  if (fromHeader.length > 0) {
+    return dedupeTransactions(fromHeader);
+  }
+
   // The compact parser handles compressed single-cell rows (and signed amounts).
-  // Skip it when a header table already produced rows to avoid DEBIT-tagging credits.
-  const fromCompact =
-    fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, defaultYear);
+  const fromCompact = parseFromCompactTableRows(rows, defaultYear);
 
   const lineSource =
     rows.length > 0
@@ -483,11 +498,7 @@ export function parseTransactionsFromPdfContent(
       : text.split(/\r?\n/);
 
   const fromLines = parseFromLines(lineSource, defaultYear);
-  const merged = dedupeTransactions([
-    ...fromHeader,
-    ...fromCompact,
-    ...fromLines,
-  ]);
+  const merged = dedupeTransactions([...fromCompact, ...fromLines]);
 
   if (merged.length > 0) return merged;
 

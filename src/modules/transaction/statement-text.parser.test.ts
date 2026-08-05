@@ -91,3 +91,53 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("Card Name / Bank Name headers do not steal the merchant column", () => {
+  const rows = [
+    ["Date", "Card Name", "Description", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "Visa Platinum", "Netflix", "649", "", "124351"],
+    ["04/05/2026", "Visa Platinum", "Spotify", "119", "", "124232"],
+    ["01/05/2026", "Visa Platinum", "Salary Credit", "", "48000", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent(PERIOD, rows);
+
+  assert.equal(txs.length, 3);
+  assert.equal(find(txs, "Netflix").amount, 649);
+  assert.equal(find(txs, "Netflix").type, "DEBIT");
+  assert.equal(find(txs, "Spotify").amount, 119);
+  assert.equal(find(txs, "Salary").amount, 48000);
+  assert.equal(find(txs, "Salary").type, "CREDIT");
+  assert.equal(
+    txs.some((t) => /visa|platinum/i.test(t.merchant)),
+    false,
+    "card product name must not become the merchant"
+  );
+});
+
+test("Bank Name beside Narration keeps narration as merchant", () => {
+  const rows = [
+    ["Date", "Bank Name", "Narration", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "HDFC Bank", "NETFLIX.COM", "649", "", "124351"],
+    ["05/05/2026", "HDFC Bank", "UPI-AMAZON PAY", "299", "", "124052"],
+  ];
+  const txs = parseTransactionsFromPdfContent(PERIOD, rows);
+
+  assert.equal(txs.length, 2);
+  assert.equal(find(txs, "NETFLIX").amount, 649);
+  assert.equal(find(txs, "AMAZON").amount, 299);
+  assert.equal(
+    txs.some((t) => /hdfc/i.test(t.merchant)),
+    false,
+    "bank name must not become the merchant"
+  );
+});
+
+test("exact Name header still maps to merchant", () => {
+  const rows = [
+    ["Date", "Name", "Amount"],
+    ["03/05/2026", "Netflix", "649"],
+  ];
+  const txs = parseTransactionsFromPdfContent(PERIOD, rows);
+  assert.equal(txs.length, 1);
+  assert.equal(find(txs, "Netflix").amount, 649);
+});
