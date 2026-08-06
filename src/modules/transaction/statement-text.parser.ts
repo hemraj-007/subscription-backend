@@ -146,6 +146,9 @@ function parseAmount(raw: unknown): number {
   const negative = s.startsWith("(") && s.endsWith(")");
   if (negative) s = s.slice(1, -1);
   s = s.replace(/[₹]|Rs\.?|INR/gi, "").trim();
+  // Strip leading/trailing Cr/Dr markers before numeric cleanup. Otherwise
+  // "Cr. 48000" becomes ".48000" (the dot from "Cr.") and Number() yields NaN.
+  s = s.replace(/^(cr|dr)\.?\s*/i, "").replace(/\s*(cr|dr)\.?$/i, "").trim();
   const n = Number(s.replace(/[^\d.-]/g, ""));
   if (Number.isNaN(n)) return 0;
   const abs = Math.abs(n);
