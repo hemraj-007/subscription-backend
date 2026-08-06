@@ -91,3 +91,69 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("Type / Dr-Cr column classifies single Amount column credits", () => {
+  const rows = [
+    ["Date", "Description", "Amount", "Type", "Balance"],
+    ["01/05/2026", "NEFT Salary", "48000", "Cr", "125000"],
+    ["03/05/2026", "Netflix", "649", "Dr", "124351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+});
+
+test("Dr/Cr column header classifies credits and debits", () => {
+  const rows = [
+    ["Date", "Narration", "Amount", "Dr/Cr"],
+    ["01/05/2026", "Salary Credit", "48000", "CR"],
+    ["03/05/2026", "Spotify Premium", "119", "DR"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.type, "CREDIT");
+  assert.equal(salary.amount, 48000);
+
+  const spotify = find(txs, "Spotify");
+  assert.equal(spotify.type, "DEBIT");
+  assert.equal(spotify.amount, 119);
+});
+
+test("amount cells with leading Cr./Dr. set direction", () => {
+  const rows = [
+    ["Date", "Narration", "Amount", "Balance"],
+    ["01/05/2026", "Salary NEFT", "Cr. 48,000.00", "1,25,000.00"],
+    ["03/05/2026", "Netflix", "Dr. 649.00", "1,24,351.00"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+});
+
+test("trailing CR/DR markers set transaction direction on unsigned lines", () => {
+  const txs = fromLines([
+    "01-May Payment Received 5000.00 CR 1,25,000",
+    "03-May Netflix Subscription 649.00 DR 1,24,351",
+  ]);
+
+  const payment = find(txs, "Payment");
+  assert.equal(payment.amount, 5000);
+  assert.equal(payment.type, "CREDIT");
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+});

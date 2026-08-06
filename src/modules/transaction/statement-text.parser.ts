@@ -64,6 +64,18 @@ const DATE_COLUMN_ALIASES = [
   "txn date",
 ];
 
+/** Direction markers in a dedicated column (common on Indian bank statement tables). */
+const TYPE_COLUMN_ALIASES = [
+  "dr cr",
+  "cr dr",
+  "type",
+  "txn type",
+  "transaction type",
+  "transaction indicator",
+  "debit credit",
+  "credit debit",
+];
+
 function normalizeHeader(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -79,6 +91,51 @@ function findColumnIndex(headers: string[], aliases: string[]): number {
   return -1;
 }
 
+function findTypeColumnIndex(headers: string[]): number {
+  const normalized = headers.map(normalizeHeader);
+  for (const alias of TYPE_COLUMN_ALIASES) {
+    const exact = normalized.indexOf(alias);
+    if (exact >= 0) return exact;
+  }
+  return -1;
+}
+
+/**
+ * Map a Type / Dr-Cr cell to DEBIT or CREDIT. Returns null when the cell is
+ * empty or not a direction marker (so callers can fall back to other heuristics).
+ */
+function inferTypeFromDirectionCell(raw: unknown): TransactionKind | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (!s) return null;
+  if (/^(cr|c|credit|deposit|crt|\+|money in)$/i.test(s)) return "CREDIT";
+  if (/^(dr|d|debit|withdrawal|wdr|\-|money out)$/i.test(s)) return "DEBIT";
+  if (/^cr\.?$/.test(s)) return "CREDIT";
+  if (/^dr\.?$/.test(s)) return "DEBIT";
+  return null;
+}
+
+/**
+ * Infer DEBIT/CREDIT from amount text. Indian bank PDFs often mark direction
+ * with a trailing (or leading) CR/DR rather than a +/- sign.
+ */
+function inferTransactionType(
+  amountToken: string,
+  afterAmount: string = ""
+): TransactionKind {
+  const token = amountToken.trim();
+  const after = afterAmount.trim();
+  if (/\bCR\b/i.test(token) || /^CR\b/i.test(after) || /^\s*cr\.?\b/i.test(token)) {
+    return "CREDIT";
+  }
+  if (/\bDR\b/i.test(token) || /^DR\b/i.test(after) || /^\s*dr\.?\b/i.test(token)) {
+    return "DEBIT";
+  }
+  if (/^\+/.test(token)) return "CREDIT";
+  if (/^-/.test(token)) return "DEBIT";
+  return "DEBIT";
+}
+
 function compactRow(row: string[]): string[] {
   return row.map((cell) => cell.trim()).filter((cell) => cell.length > 0);
 }
@@ -89,6 +146,9 @@ function parseAmount(raw: unknown): number {
   const negative = s.startsWith("(") && s.endsWith(")");
   if (negative) s = s.slice(1, -1);
   s = s.replace(/[₹]|Rs\.?|INR/gi, "").trim();
+  // Strip leading/trailing Cr/Dr markers before numeric cleanup. Otherwise
+  // "Cr. 48000" becomes ".48000" (the dot from "Cr.") and Number() yields NaN.
+  s = s.replace(/^(cr|dr)\.?\s*/i, "").replace(/\s*(cr|dr)\.?$/i, "").trim();
   const n = Number(s.replace(/[^\d.-]/g, ""));
   if (Number.isNaN(n)) return 0;
   const abs = Math.abs(n);
@@ -199,20 +259,31 @@ function parseMerchantAndAmount(
   const signed = trimmed.match(TXN_SIGNED_AMOUNT);
   if (signed && signed.index !== undefined) {
     const amount = parseAmount(signed[1]);
-    const type: TransactionKind = signed[1].trim().startsWith("+") ? "CREDIT" : "DEBIT";
+    const afterSigned = trimmed.slice(signed.index + signed[0].length);
+    const type = inferTransactionType(signed[1], afterSigned);
     const merchant = trimmed.slice(0, signed.index).replace(/\s+/g, " ").trim();
     if (amount > 0 && merchant) return { merchant, amount, type };
   }
 
   // No sign present (e.g. "Netflix 649" or "Netflix 649 1,24,351"): take the
   // first money-like token as the transaction value (balance, if any, trails it).
+  // Also honor trailing/leading CR/DR markers ("Payment 5000.00 CR", "Salary Cr 48000").
   const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN));
   for (const token of tokens) {
     if (token.index === undefined) continue;
     const amount = parseAmount(token[0]);
     if (amount <= 0) continue;
-    const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
-    if (merchant) return { merchant, amount, type: "DEBIT" };
+    let merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
+    if (!merchant) continue;
+    const after = trimmed.slice(token.index + token[0].length);
+    let type = inferTransactionType(token[0], after);
+    // Direction marker immediately before the amount ("Cr 48000" / "Dr.649").
+    const leadingDir = merchant.match(/\s+(cr|dr)\.?$/i);
+    if (leadingDir) {
+      type = /^cr/i.test(leadingDir[1]!) ? "CREDIT" : "DEBIT";
+      merchant = merchant.slice(0, merchant.length - leadingDir[0].length).trim();
+    }
+    if (merchant) return { merchant, amount, type };
   }
 
   return null;
@@ -286,8 +357,13 @@ function parseLineToTransaction(
       ? afterDate.slice(0, amountIdx)
       : afterDate.replace(amountInfo.token, "");
   const merchant = merchantSlice.replace(/\s+/g, " ").trim() || "Unknown";
+  const afterAmount =
+    amountIdx >= 0
+      ? afterDate.slice(amountIdx + amountInfo.token.length)
+      : "";
+  const type = inferTransactionType(amountInfo.token, afterAmount);
 
-  return { merchant, amount: amountInfo.amount, type: "DEBIT", date };
+  return { merchant, amount: amountInfo.amount, type, date };
 }
 
 function findHeaderRowIndex(rows: string[][]): number {
@@ -369,6 +445,7 @@ function parseFromHeaderTable(
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);
+  const typeCol = findTypeColumnIndex(headers);
 
   if (dateCol < 0) return [];
 
@@ -394,10 +471,24 @@ function parseFromHeaderTable(
       amount = parseAmount(row[creditCol]);
       if (amount > 0) type = "CREDIT";
     }
-    if (amount <= 0 && amountCol >= 0) amount = parseAmount(row[amountCol]);
+    if (amount <= 0 && amountCol >= 0) {
+      const rawAmount = String(row[amountCol] ?? "");
+      amount = parseAmount(rawAmount);
+      if (amount > 0) {
+        const fromTypeCol =
+          typeCol >= 0 ? inferTypeFromDirectionCell(row[typeCol]) : null;
+        type = fromTypeCol ?? inferTransactionType(rawAmount);
+      }
+    }
     if (amount <= 0) {
-      const skip = [dateCol, merchantCol, balanceCol].filter((i) => i >= 0);
+      const skip = [dateCol, merchantCol, balanceCol, typeCol].filter(
+        (idx) => idx >= 0
+      );
       amount = findAmountInRow(row, skip);
+      if (amount > 0 && typeCol >= 0) {
+        const fromTypeCol = inferTypeFromDirectionCell(row[typeCol]);
+        if (fromTypeCol) type = fromTypeCol;
+      }
     }
     if (amount <= 0) continue;
 
@@ -406,7 +497,11 @@ function parseFromHeaderTable(
     if (!merchant) {
       const parts = row.filter(
         (_, idx) =>
-          idx !== dateCol && idx !== debitCol && idx !== creditCol && idx !== balanceCol
+          idx !== dateCol &&
+          idx !== debitCol &&
+          idx !== creditCol &&
+          idx !== balanceCol &&
+          idx !== typeCol
       );
       merchant = compactRow(parts).join(" ").replace(/\s+/g, " ").trim();
     }

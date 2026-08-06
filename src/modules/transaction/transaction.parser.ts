@@ -52,6 +52,18 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+/** Direction markers in a dedicated column (common on Indian bank CSV exports). */
+const TYPE_COLUMN_ALIASES = [
+  "dr cr",
+  "cr dr",
+  "type",
+  "txn type",
+  "transaction type",
+  "transaction indicator",
+  "debit credit",
+  "credit debit",
+];
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
@@ -65,12 +77,48 @@ function findColumnKey(
   return undefined;
 }
 
+/** Collapse punctuation so "Dr/Cr" and "Dr / Cr" both match alias "dr cr". */
+function findTypeColumnKey(headerKeys: string[]): string | undefined {
+  const normalized = new Map(
+    headerKeys.map((k) => [
+      k.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(),
+      k,
+    ])
+  );
+  for (const alias of TYPE_COLUMN_ALIASES) {
+    if (normalized.has(alias)) return normalized.get(alias);
+  }
+  return undefined;
+}
+
+/**
+ * Map a Type / Dr-Cr cell to DEBIT or CREDIT. Returns null when the cell is
+ * empty or not a direction marker (so callers can fall back to other heuristics).
+ */
+function inferTypeFromDirectionCell(raw: unknown): TransactionKind | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (!s) return null;
+  if (/^(cr|c|credit|deposit|crt|\+|money in)$/i.test(s)) return "CREDIT";
+  if (/^(dr|d|debit|withdrawal|wdr|\-|money out)$/i.test(s)) return "DEBIT";
+  // Allow "CR." / "DR." and short tokens with trailing punctuation.
+  if (/^cr\.?$/.test(s)) return "CREDIT";
+  if (/^dr\.?$/.test(s)) return "DEBIT";
+  return null;
+}
+
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
 const MAX_REASONABLE_AMOUNT = 100_000_000;
 
 function parseAmount(raw: unknown): number {
   if (raw === undefined || raw === null || raw === "") return 0;
-  const s = String(raw).trim().replace(/,/g, "");
+  let s = String(raw).trim().replace(/,/g, "");
+  const negative = s.startsWith("(") && s.endsWith(")");
+  if (negative) s = s.slice(1, -1);
+  s = s.replace(/[₹]|Rs\.?|INR/gi, "").trim();
+  // Strip leading/trailing Cr/Dr markers before numeric cleanup. Otherwise
+  // "Cr. 48000" becomes ".48000" (the dot from "Cr.") and Number() yields NaN.
+  s = s.replace(/^(cr|dr)\.?\s*/i, "").replace(/\s*(cr|dr)\.?$/i, "").trim();
   const n = Number(s.replace(/[^\d.-]/g, ""));
   if (Number.isNaN(n)) return 0;
   const abs = Math.abs(n);
@@ -155,6 +203,7 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
     let amountKey: string | undefined;
     let debitKey: string | undefined;
     let creditKey: string | undefined;
+    let typeKey: string | undefined;
     let dateKey = "date";
 
     fs.createReadStream(filePath)
@@ -167,6 +216,7 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
             findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ?? headers[0] ?? "merchant";
           debitKey = findColumnKey(headers, DEBIT_COLUMN_ALIASES);
           creditKey = findColumnKey(headers, CREDIT_COLUMN_ALIASES);
+          typeKey = findTypeColumnKey(headers);
           amountKey =
             findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ??
             // Only fall back to a generic "amount"-ish header when there is no
@@ -189,6 +239,9 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
         const credit = creditKey ? parseAmount(row[creditKey]) : 0;
         const rawGeneric = amountKey ? String(row[amountKey] ?? row.amount ?? "") : "";
         const generic = parseAmount(rawGeneric);
+        const directionFromTypeCol = typeKey
+          ? inferTypeFromDirectionCell(row[typeKey])
+          : null;
 
         let amount = generic;
         let type: TransactionKind = "DEBIT";
@@ -199,8 +252,17 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
           amount = credit;
           type = "CREDIT";
         } else if (generic > 0) {
-          // A leading "-" or parenthesis in a single amount column means money in.
-          type = /^\s*[-(]/.test(rawGeneric) ? "CREDIT" : "DEBIT";
+          // Prefer an explicit Type / Dr-Cr column when present. Otherwise:
+          // trailing CR/DR markers, then signed-amount heuristics ("+" = money in).
+          if (directionFromTypeCol) {
+            type = directionFromTypeCol;
+          } else if (/\bCR\b/i.test(rawGeneric) || /^\s*cr\.?\b/i.test(rawGeneric)) {
+            type = "CREDIT";
+          } else if (/\bDR\b/i.test(rawGeneric) || /^\s*dr\.?\b/i.test(rawGeneric)) {
+            type = "DEBIT";
+          } else {
+            type = /^\s*\+/.test(rawGeneric) ? "CREDIT" : "DEBIT";
+          }
         }
 
         const date = parseDate(row[dateKey] ?? row.date);
