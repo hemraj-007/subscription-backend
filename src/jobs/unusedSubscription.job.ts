@@ -3,9 +3,27 @@ import { prisma } from "../config/prisma";
 
 const INACTIVITY_DAYS = 30;
 
-export async function detectUnusedSubscriptions(userId?: string) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - INACTIVITY_DAYS);
+/**
+ * Inactivity cutoff as a UTC calendar day (midnight). Statement parsers store
+ * dates via Date.UTC(...), so comparing them to `now - 30d` with a leftover
+ * clock time falsely marks month-old charges unused (e.g. May 1 00:00 UTC
+ * vs cutoff May 1 15:00 UTC on the afternoon of day 30).
+ */
+export function inactivityCutoff(now = new Date()): Date {
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - INACTIVITY_DAYS
+    )
+  );
+}
+
+export async function detectUnusedSubscriptions(
+  userId?: string,
+  now: Date = new Date()
+) {
+  const cutoff = inactivityCutoff(now);
 
   const subscriptions = await prisma.subscription.findMany({
     where: {
