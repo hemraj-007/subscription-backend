@@ -19,8 +19,11 @@ export function inactivityCutoff(now = new Date()): Date {
   );
 }
 
-export async function detectUnusedSubscriptions(userId?: string) {
-  const cutoff = inactivityCutoff();
+export async function detectUnusedSubscriptions(
+  userId?: string,
+  now: Date = new Date()
+) {
+  const cutoff = inactivityCutoff(now);
 
   const subscriptions = await prisma.subscription.findMany({
     where: {

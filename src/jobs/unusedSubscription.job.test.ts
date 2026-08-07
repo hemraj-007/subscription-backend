@@ -57,7 +57,6 @@ test("detectUnusedSubscriptions keeps month-old UTC midnight charges active in t
     transactionGroupBy: transactionDelegate.groupBy,
     alertFindMany: alertDelegate.findMany,
     alertCreateMany: alertDelegate.createMany,
-    dateNow: Date.now,
   };
 
   let updateManyCalls = 0;
@@ -69,13 +68,7 @@ test("detectUnusedSubscriptions keeps month-old UTC midnight charges active in t
     transactionDelegate.groupBy = originals.transactionGroupBy;
     alertDelegate.findMany = originals.alertFindMany;
     alertDelegate.createMany = originals.alertCreateMany;
-    Date.now = originals.dateNow;
   });
-
-  // Freeze "now" to May 31 15:00 UTC — 30 calendar days after May 1, with a
-  // nonzero clock time that previously pushed cutoff past May 1 00:00 UTC.
-  const frozenNow = Date.UTC(2026, 4, 31, 15, 0, 0);
-  Date.now = () => frozenNow;
 
   subscriptionDelegate.findMany = async () => [
     {
@@ -105,7 +98,12 @@ test("detectUnusedSubscriptions keeps month-old UTC midnight charges active in t
     return { count: 0 };
   };
 
-  await detectUnusedSubscriptions("user-1");
+  // May 31 15:00 UTC — 30 calendar days after May 1, with a nonzero clock time
+  // that previously pushed cutoff past May 1 00:00 UTC.
+  await detectUnusedSubscriptions(
+    "user-1",
+    new Date(Date.UTC(2026, 4, 31, 15, 0, 0))
+  );
 
   assert.equal(updateManyCalls, 0, "must not mark AT_RISK on day 30 afternoon");
   assert.equal(createManyCalls, 0, "must not create UNUSED alerts on day 30 afternoon");
