@@ -19,6 +19,20 @@ const MERCHANT_COLUMN_ALIASES = [
   "name",
   "payee",
   "transaction details",
+  // Indian bank CSV exports often use Remarks / Transaction Remarks / Memo
+  // instead of Description/Narration (PDF parser already accepts these).
+  "remarks",
+  "remark",
+  "transaction remarks",
+  "transaction remark",
+  "memo",
+];
+
+const BALANCE_COLUMN_ALIASES = [
+  "balance",
+  "closing balance",
+  "running balance",
+  "available balance",
 ];
 
 const AMOUNT_COLUMN_ALIASES = [
@@ -163,8 +177,6 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
         // Resolve column mapping from header names (first row)
         if (!resolved) {
           const headers = Object.keys(row);
-          merchantKey =
-            findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ?? headers[0] ?? "merchant";
           debitKey = findColumnKey(headers, DEBIT_COLUMN_ALIASES);
           creditKey = findColumnKey(headers, CREDIT_COLUMN_ALIASES);
           amountKey =
@@ -178,6 +190,19 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
             findColumnKey(headers, DATE_COLUMN_ALIASES) ??
             headers.find((h) => /date/i.test(h)) ??
             "date";
+          const balanceKey = findColumnKey(headers, BALANCE_COLUMN_ALIASES);
+          // Never fall back to Date/Amount/Balance as the merchant column —
+          // that turns every charge into a date-string merchant and kills
+          // subscription detection (common when banks label the column Remarks).
+          const reserved = new Set(
+            [dateKey, amountKey, debitKey, creditKey, balanceKey].filter(
+              (k): k is string => Boolean(k)
+            )
+          );
+          merchantKey =
+            findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ??
+            headers.find((h) => !reserved.has(h)) ??
+            "";
           resolved = true;
         }
 
