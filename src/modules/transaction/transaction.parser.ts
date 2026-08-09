@@ -33,6 +33,11 @@ const DEBIT_COLUMN_ALIASES = [
   "debit amount",
   "withdrawal",
   "withdrawal amount",
+  // Common Indian bank split-ledger headers (Dr = debit).
+  "amount dr",
+  "amt dr",
+  "amount debit",
+  "amt debit",
 ];
 
 const CREDIT_COLUMN_ALIASES = [
@@ -40,6 +45,11 @@ const CREDIT_COLUMN_ALIASES = [
   "credit amount",
   "deposit",
   "deposit amount",
+  // Common Indian bank split-ledger headers (Cr = credit).
+  "amount cr",
+  "amt cr",
+  "amount credit",
+  "amt credit",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -52,15 +62,21 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+/** Collapse punctuation/spacing so "Amount (Dr)" matches "amount dr". */
+function normalizeHeaderKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [normalizeHeaderKey(k), k])
   );
   for (const alias of aliases) {
-    if (normalized.has(alias)) return normalized.get(alias);
+    const key = normalizeHeaderKey(alias);
+    if (normalized.has(key)) return normalized.get(key);
   }
   return undefined;
 }

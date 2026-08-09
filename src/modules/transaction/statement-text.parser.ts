@@ -79,6 +79,42 @@ function findColumnIndex(headers: string[], aliases: string[]): number {
   return -1;
 }
 
+/**
+ * Exact header match only — used for debit/credit ledger columns so labels like
+ * "Credit Limit" or "Amount (Dr)" are not confused via substring matching.
+ */
+function findExactColumnIndex(headers: string[], aliases: string[]): number {
+  const normalized = headers.map(normalizeHeader);
+  for (const alias of aliases) {
+    const needle = normalizeHeader(alias);
+    const idx = normalized.indexOf(needle);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+const DEBIT_LEDGER_ALIASES = [
+  "debit",
+  "debit amount",
+  "withdrawal",
+  "withdrawal amount",
+  "amount dr",
+  "amt dr",
+  "amount debit",
+  "amt debit",
+];
+
+const CREDIT_LEDGER_ALIASES = [
+  "credit",
+  "credit amount",
+  "deposit",
+  "deposit amount",
+  "amount cr",
+  "amt cr",
+  "amount credit",
+  "amt credit",
+];
+
 function compactRow(row: string[]): string[] {
   return row.map((cell) => cell.trim()).filter((cell) => cell.length > 0);
 }
@@ -364,8 +400,10 @@ function parseFromHeaderTable(
 
   const headers = rows[headerIdx];
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
-  const debitCol = findColumnIndex(headers, ["debit"]);
-  const creditCol = findColumnIndex(headers, ["credit"]);
+  // Exact match so "Amount (Dr)"/"Amt Cr" classify correctly and "Credit Limit"
+  // is never treated as a credit amount column.
+  const debitCol = findExactColumnIndex(headers, DEBIT_LEDGER_ALIASES);
+  const creditCol = findExactColumnIndex(headers, CREDIT_LEDGER_ALIASES);
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);

@@ -76,6 +76,40 @@ test("header tables distinguish debit and credit columns", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("header tables recognize Amount (Dr)/(Cr) ledger columns", () => {
+  const rows = [
+    ["Date", "Description", "Amount (Dr)", "Amount (Cr)", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["01/05/2026", "Salary Credit", "", "48000", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
+test("header tables recognize Amt Dr/Amt Cr ledger columns", () => {
+  const rows = [
+    ["Date", "Description", "Amt Dr", "Amt Cr", "Balance"],
+    ["03/05/2026", "Spotify", "119", "", "10000"],
+    ["02/05/2026", "Refund", "", "500", "10500"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const spotify = find(txs, "Spotify");
+  assert.equal(spotify.type, "DEBIT");
+  assert.equal(spotify.amount, 119);
+
+  const refund = find(txs, "Refund");
+  assert.equal(refund.type, "CREDIT");
+  assert.equal(refund.amount, 500);
+});
+
 test("compressed single-cell table rows parse like lines", () => {
   const rows = [
     [PERIOD],
