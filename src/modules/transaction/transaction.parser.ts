@@ -33,6 +33,16 @@ const DEBIT_COLUMN_ALIASES = [
   "debit amount",
   "withdrawal",
   "withdrawal amount",
+  // Word-order / past-participle variants used by bank CSV exports.
+  // Distinct from "amount dr" / "amt dr" (PR #85) and "withdrawal amt" (PR #79).
+  "amount debited",
+  "amount debited inr",
+  "amt debited",
+  "amt debited inr",
+  "dr amount",
+  "dr amount inr",
+  "dr amt",
+  "dr amt inr",
 ];
 
 const CREDIT_COLUMN_ALIASES = [
@@ -40,6 +50,14 @@ const CREDIT_COLUMN_ALIASES = [
   "credit amount",
   "deposit",
   "deposit amount",
+  "amount credited",
+  "amount credited inr",
+  "amt credited",
+  "amt credited inr",
+  "cr amount",
+  "cr amount inr",
+  "cr amt",
+  "cr amt inr",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -52,15 +70,21 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+/** Collapse punctuation/spacing so "Dr. Amount" / "Amount Debited (INR)" match. */
+function normalizeHeaderKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [normalizeHeaderKey(k), k])
   );
   for (const alias of aliases) {
-    if (normalized.has(alias)) return normalized.get(alias);
+    const key = normalizeHeaderKey(alias);
+    if (normalized.has(key)) return normalized.get(key);
   }
   return undefined;
 }

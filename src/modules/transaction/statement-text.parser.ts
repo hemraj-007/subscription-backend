@@ -70,11 +70,72 @@ function normalizeHeader(value: string): string {
 
 function findColumnIndex(headers: string[], aliases: string[]): number {
   const normalized = headers.map(normalizeHeader);
+  // Prefer exact header matches so "Amount" wins over a later "Credit Limit"
+  // when both could fuzzy-match an alias like "credit".
+  for (const alias of aliases) {
+    const exact = normalized.indexOf(alias);
+    if (exact >= 0) return exact;
+  }
   for (let i = 0; i < normalized.length; i++) {
     const header = normalized[i];
+    // Account metadata columns often contain "credit"/"debit" as adjectives
+    // (e.g. "Credit Limit", "Available Credit") and must not be treated as
+    // transaction amount columns.
+    if (/\b(limit|available|card|score|interest)\b/.test(header)) continue;
     for (const alias of aliases) {
-      if (header === alias || header.includes(alias)) return i;
+      if (header.includes(alias)) return i;
     }
+  }
+  return -1;
+}
+
+/**
+ * Debit/credit ledger columns must match exact labels. Fuzzy includes("credit")
+ * wrongly selects metadata like "Credit Limit" / "Available Credit", and short
+ * aliases like "debit" miss bank headers such as "Dr Amount" / "Amount Debited".
+ */
+function findDebitCreditColumnIndex(
+  headers: string[],
+  kind: "debit" | "credit"
+): number {
+  const aliases =
+    kind === "debit"
+      ? [
+          "debit amount",
+          "debit amt",
+          "amount debited",
+          "amount debit",
+          "amt debited",
+          "amt debit",
+          "dr amount",
+          "dr amt",
+          "amount dr",
+          "amt dr",
+          "withdrawal amount",
+          "withdrawal amt",
+          "withdrawal",
+          "debit",
+        ]
+      : [
+          "credit amount",
+          "credit amt",
+          "amount credited",
+          "amount credit",
+          "amt credited",
+          "amt credit",
+          "cr amount",
+          "cr amt",
+          "amount cr",
+          "amt cr",
+          "deposit amount",
+          "deposit amt",
+          "deposit",
+          "credit",
+        ];
+  const normalized = headers.map(normalizeHeader);
+  for (const alias of aliases) {
+    const exact = normalized.indexOf(alias);
+    if (exact >= 0) return exact;
   }
   return -1;
 }
@@ -364,8 +425,8 @@ function parseFromHeaderTable(
 
   const headers = rows[headerIdx];
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
-  const debitCol = findColumnIndex(headers, ["debit"]);
-  const creditCol = findColumnIndex(headers, ["credit"]);
+  const debitCol = findDebitCreditColumnIndex(headers, "debit");
+  const creditCol = findDebitCreditColumnIndex(headers, "credit");
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);
@@ -468,14 +529,16 @@ export function parseTransactionsFromPdfContent(
   const defaultYear = inferStatementYear(text);
 
   // Prefer an explicit header table: it is the only shape that reliably
-  // distinguishes debit from credit columns. Listed first so its credit/debit
-  // classification wins during dedupe over the column-agnostic parsers below.
+  // distinguishes debit from credit columns. When it already produced rows,
+  // do not merge free-text re-parses of the same cells (those re-import
+  // Credit Limit / Running Total / Ref fragments as fake DEBITs).
   const fromHeader = parseFromHeaderTable(rows, defaultYear);
+  if (fromHeader.length > 0) {
+    return dedupeTransactions(fromHeader);
+  }
 
   // The compact parser handles compressed single-cell rows (and signed amounts).
-  // Skip it when a header table already produced rows to avoid DEBIT-tagging credits.
-  const fromCompact =
-    fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, defaultYear);
+  const fromCompact = parseFromCompactTableRows(rows, defaultYear);
 
   const lineSource =
     rows.length > 0
@@ -484,7 +547,6 @@ export function parseTransactionsFromPdfContent(
 
   const fromLines = parseFromLines(lineSource, defaultYear);
   const merged = dedupeTransactions([
-    ...fromHeader,
     ...fromCompact,
     ...fromLines,
   ]);

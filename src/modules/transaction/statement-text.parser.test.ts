@@ -91,3 +91,62 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("Dr Amount / Cr Amount headers classify credits as CREDIT", () => {
+  const rows = [
+    ["Date", "Description", "Dr Amount", "Cr Amount", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["01/05/2026", "Salary", "", "48000", "172351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
+test("Amount Debited / Amount Credited headers classify refunds as CREDIT", () => {
+  const rows = [
+    ["Date", "Description", "Amount Debited", "Amount Credited", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["02/05/2026", "Refund", "", "649", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  assert.equal(find(txs, "Netflix").type, "DEBIT");
+  assert.equal(find(txs, "Refund").type, "CREDIT");
+  assert.equal(find(txs, "Refund").amount, 649);
+});
+
+test("Credit Limit metadata is not treated as a credit amount column", () => {
+  const rows = [
+    ["Date", "Description", "Credit Limit", "Amount", "Balance"],
+    ["03/05/2026", "Netflix", "200000", "649", "124351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  assert.equal(
+    txs.some((t) => t.amount === 200000),
+    false
+  );
+});
+
+test("Withdrawal Amt / Deposit Amt headers classify deposits as CREDIT", () => {
+  const rows = [
+    ["Date", "Narration", "Withdrawal Amt", "Deposit Amt", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["01/05/2026", "Salary", "", "48000", "172351"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  assert.equal(find(txs, "Netflix").type, "DEBIT");
+  assert.equal(find(txs, "Salary").type, "CREDIT");
+  assert.equal(find(txs, "Salary").amount, 48000);
+});
