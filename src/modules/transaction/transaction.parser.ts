@@ -14,11 +14,22 @@ const MERCHANT_COLUMN_ALIASES = [
   "transaction description",
   "details",
   "particulars",
+  // Axis/SBI-style exports often use the longer "Transaction Particulars" label.
+  "transaction particulars",
+  "tran particulars",
   "narration",
+  // UK/EU banks frequently label the merchant column "Narrative".
+  "narrative",
   "merchant name",
   "name",
   "payee",
+  "payee name",
+  "transaction name",
   "transaction details",
+  "beneficiary",
+  "beneficiary name",
+  "counter party",
+  "counterparty",
 ];
 
 const AMOUNT_COLUMN_ALIASES = [
@@ -52,6 +63,29 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+const BALANCE_COLUMN_ALIASES = [
+  "balance",
+  "closing balance",
+  "running balance",
+  "available balance",
+];
+
+/** Cheque / reference columns that must never be treated as the merchant. */
+const REF_COLUMN_ALIASES = [
+  "chq/ref no",
+  "chq / ref no",
+  "cheque no",
+  "cheque number",
+  "ref no",
+  "ref no.",
+  "reference",
+  "reference no",
+  "reference number",
+  "txn ref",
+  "transaction ref",
+  "branch code",
+];
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
@@ -63,6 +97,13 @@ function findColumnKey(
     if (normalized.has(alias)) return normalized.get(alias);
   }
   return undefined;
+}
+
+function isRefLikeHeader(header: string): boolean {
+  const key = header.toLowerCase().trim();
+  if (REF_COLUMN_ALIASES.includes(key)) return true;
+  // Broad match for bank "Chq/Ref No", "Ref. No", "Cheque/Ref Number", etc.
+  return /\b(chq|cheque|ref(?:erence)?|branch\s*code)\b/i.test(key);
 }
 
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
@@ -163,8 +204,6 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
         // Resolve column mapping from header names (first row)
         if (!resolved) {
           const headers = Object.keys(row);
-          merchantKey =
-            findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ?? headers[0] ?? "merchant";
           debitKey = findColumnKey(headers, DEBIT_COLUMN_ALIASES);
           creditKey = findColumnKey(headers, CREDIT_COLUMN_ALIASES);
           amountKey =
@@ -178,6 +217,20 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
             findColumnKey(headers, DATE_COLUMN_ALIASES) ??
             headers.find((h) => /date/i.test(h)) ??
             "date";
+          const balanceKey = findColumnKey(headers, BALANCE_COLUMN_ALIASES);
+          // Never fall back to Date / Amount / Balance / cheque-ref columns —
+          // those turn every charge into a date or ref string and kill
+          // subscription grouping (common when the real column is
+          // "Transaction Particulars" after "Chq/Ref No").
+          const reserved = new Set(
+            [dateKey, amountKey, debitKey, creditKey, balanceKey].filter(
+              (k): k is string => Boolean(k)
+            )
+          );
+          merchantKey =
+            findColumnKey(headers, MERCHANT_COLUMN_ALIASES) ??
+            headers.find((h) => !reserved.has(h) && !isRefLikeHeader(h)) ??
+            "";
           resolved = true;
         }
 
