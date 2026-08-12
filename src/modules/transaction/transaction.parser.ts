@@ -33,6 +33,8 @@ const DEBIT_COLUMN_ALIASES = [
   "debit amount",
   "withdrawal",
   "withdrawal amount",
+  // Bare ledger abbreviations used by many Indian bank CSV/PDF exports.
+  "dr",
 ];
 
 const CREDIT_COLUMN_ALIASES = [
@@ -40,6 +42,8 @@ const CREDIT_COLUMN_ALIASES = [
   "credit amount",
   "deposit",
   "deposit amount",
+  // Bare ledger abbreviations used by many Indian bank CSV/PDF exports.
+  "cr",
 ];
 
 const DATE_COLUMN_ALIASES = [
