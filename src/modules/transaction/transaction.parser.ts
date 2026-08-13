@@ -30,6 +30,7 @@ const AMOUNT_COLUMN_ALIASES = [
 
 const DEBIT_COLUMN_ALIASES = [
   "debit",
+  "debits",
   "debit amount",
   "withdrawal",
   "withdrawal amount",
@@ -37,6 +38,7 @@ const DEBIT_COLUMN_ALIASES = [
 
 const CREDIT_COLUMN_ALIASES = [
   "credit",
+  "credits",
   "credit amount",
   "deposit",
   "deposit amount",
