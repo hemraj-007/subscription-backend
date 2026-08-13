@@ -43,7 +43,9 @@ const MERCHANT_COLUMN_ALIASES = [
 const AMOUNT_COLUMN_ALIASES = [
   "amount",
   "debit",
+  "debits",
   "credit",
+  "credits",
   "withdrawal",
   "deposit",
   "transaction amount",
@@ -364,8 +366,9 @@ function parseFromHeaderTable(
 
   const headers = rows[headerIdx];
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
-  const debitCol = findColumnIndex(headers, ["debit"]);
-  const creditCol = findColumnIndex(headers, ["credit"]);
+  // Include plurals used by accounting/bank exports ("Debits"/"Credits").
+  const debitCol = findColumnIndex(headers, ["debit", "debits"]);
+  const creditCol = findColumnIndex(headers, ["credit", "credits"]);
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);
