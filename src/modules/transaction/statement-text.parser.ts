@@ -79,6 +79,38 @@ function findColumnIndex(headers: string[], aliases: string[]): number {
   return -1;
 }
 
+/**
+ * FX / metadata columns that contain "amount" but are not the billed txn value.
+ * ICICI tables list `Intl. Amount` before `Amount (INR)`; `includes("amount")`
+ * would otherwise treat the forex cell as the charge (or 0 for domestic rows).
+ */
+const NON_TXN_AMOUNT_HEADER =
+  /\b(intl|international|foreign|forex|fx|original|reward|points?|balance|opening|closing|running|outstanding|limit|available|usd|eur|gbp|fcy)\b/i;
+
+const LOCAL_AMOUNT_HINT = /inr|\brs\b|billed|billing/i;
+
+function findBestAmountColumnIndex(headers: string[]): number {
+  const normalized = headers.map(normalizeHeader);
+  const candidates: number[] = [];
+
+  for (let i = 0; i < normalized.length; i++) {
+    const header = normalized[i];
+    const matchesAlias = AMOUNT_COLUMN_ALIASES.some(
+      (alias) => header === alias || header.includes(alias)
+    );
+    if (!matchesAlias) continue;
+    if (NON_TXN_AMOUNT_HEADER.test(header)) continue;
+    candidates.push(i);
+  }
+
+  if (candidates.length === 0) {
+    return findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
+  }
+
+  const local = candidates.find((i) => LOCAL_AMOUNT_HINT.test(normalized[i]!));
+  return local ?? candidates[0]!;
+}
+
 function compactRow(row: string[]): string[] {
   return row.map((cell) => cell.trim()).filter((cell) => cell.length > 0);
 }
@@ -366,7 +398,7 @@ function parseFromHeaderTable(
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
   const debitCol = findColumnIndex(headers, ["debit"]);
   const creditCol = findColumnIndex(headers, ["credit"]);
-  const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
+  const amountCol = findBestAmountColumnIndex(headers);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);
 
