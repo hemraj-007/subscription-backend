@@ -65,6 +65,28 @@ function findColumnKey(
   return undefined;
 }
 
+/**
+ * FX / metadata columns that contain "amount" but are not the billed txn value.
+ * ICICI card exports put `Intl. Amount` before `Amount (INR)`; a naive
+ * /amount/i scan would pick the empty/forex column and drop every domestic row
+ * (or store $24.48 instead of ₹1787).
+ */
+const NON_TXN_AMOUNT_HEADER =
+  /\b(intl|international|foreign|forex|fx|original|reward|points?|balance|opening|closing|running|outstanding|limit|available|usd|eur|gbp|fcy)\b/i;
+
+const LOCAL_AMOUNT_HINT = /inr|\brs\b|₹|billed|billing/i;
+
+/** Prefer the local billed amount when several columns match /amount/i. */
+function findGenericAmountKey(headers: string[]): string | undefined {
+  const amountLike = headers.filter((h) => /amount/i.test(h));
+  if (amountLike.length === 0) return undefined;
+
+  const txnAmounts = amountLike.filter((h) => !NON_TXN_AMOUNT_HEADER.test(h));
+  const pool = txnAmounts.length > 0 ? txnAmounts : amountLike;
+  const local = pool.find((h) => LOCAL_AMOUNT_HINT.test(h));
+  return local ?? pool[0];
+}
+
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
 const MAX_REASONABLE_AMOUNT = 100_000_000;
 
@@ -171,9 +193,8 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
             findColumnKey(headers, AMOUNT_COLUMN_ALIASES) ??
             // Only fall back to a generic "amount"-ish header when there is no
             // dedicated debit/credit column (avoids picking up "balance").
-            (debitKey || creditKey
-              ? undefined
-              : headers.find((h) => /amount/i.test(h)));
+            // Skip Intl/Forex/Balance amount columns so billed INR wins.
+            (debitKey || creditKey ? undefined : findGenericAmountKey(headers));
           dateKey =
             findColumnKey(headers, DATE_COLUMN_ALIASES) ??
             headers.find((h) => /date/i.test(h)) ??
