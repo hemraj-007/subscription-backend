@@ -33,6 +33,9 @@ const DEBIT_COLUMN_ALIASES = [
   "debit amount",
   "withdrawal",
   "withdrawal amount",
+  // PSU / Tally-style split ledgers: "Withdrawal(Dr)" / "Withdrawal (Dr)"
+  "withdrawal dr",
+  "withdrawals dr",
 ];
 
 const CREDIT_COLUMN_ALIASES = [
@@ -40,6 +43,9 @@ const CREDIT_COLUMN_ALIASES = [
   "credit amount",
   "deposit",
   "deposit amount",
+  // PSU / Tally-style split ledgers: "Deposit(Cr)" / "Deposit (Cr)"
+  "deposit cr",
+  "deposits cr",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -52,15 +58,21 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+/** Collapse punctuation/spacing so "Withdrawal(Dr)" matches "withdrawal dr". */
+function normalizeHeaderKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [normalizeHeaderKey(k), k])
   );
   for (const alias of aliases) {
-    if (normalized.has(alias)) return normalized.get(alias);
+    const key = normalizeHeaderKey(alias);
+    if (normalized.has(key)) return normalized.get(key);
   }
   return undefined;
 }
