@@ -52,15 +52,31 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+/**
+ * Collapse punctuation/spacing and drop a trailing currency token so headers
+ * like "Debit (INR)", "Credit Amount (INR)", and "Debit (Rs.)" match the
+ * existing debit/credit aliases. Exact lowercase match misses these, and
+ * `/amount/i` does not apply, so the whole file would otherwise import 0 rows.
+ */
+function normalizeHeaderKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+(?:in\s+)?(?:inr|rs)$/i, "")
+    .trim();
+}
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [normalizeHeaderKey(k), k])
   );
   for (const alias of aliases) {
-    if (normalized.has(alias)) return normalized.get(alias);
+    const key = normalizeHeaderKey(alias);
+    if (normalized.has(key)) return normalized.get(key);
   }
   return undefined;
 }
