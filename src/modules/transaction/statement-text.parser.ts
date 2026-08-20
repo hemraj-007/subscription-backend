@@ -55,13 +55,21 @@ const AMOUNT_COLUMN_ALIASES = [
 
 const DATE_COLUMN_ALIASES = [
   "date",
-  "transaction date",
-  "posting date",
-  "value date",
-  "trans date",
-  "transaction date (posting)",
-  "booking date",
   "txn date",
+  "txn dt",
+  "transaction date",
+  "tran date",
+  "tran dt",
+  "trans date",
+  "trans dt",
+  "posting date",
+  "posting dt",
+  "value date",
+  "value dt",
+  "val dt",
+  "booking date",
+  "booking dt",
+  "transaction date (posting)",
 ];
 
 function normalizeHeader(value: string): string {
@@ -293,7 +301,8 @@ function parseLineToTransaction(
 function findHeaderRowIndex(rows: string[][]): number {
   const scanLimit = Math.min(rows.length, 80);
   for (let i = 0; i < scanLimit; i++) {
-    const joined = rows[i].join(" ").toLowerCase();
+    // Normalize punctuation so "Txn. Dt" still matches alias "txn dt".
+    const joined = normalizeHeader(rows[i].join(" "));
     const hasDate = DATE_COLUMN_ALIASES.some((alias) => joined.includes(alias));
     const hasAmount = AMOUNT_COLUMN_ALIASES.some((alias) =>
       joined.includes(alias)

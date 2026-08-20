@@ -44,13 +44,26 @@ const CREDIT_COLUMN_ALIASES = [
 
 const DATE_COLUMN_ALIASES = [
   "date",
+  "txn date",
+  "txn dt",
   "transaction date",
-  "posting date",
-  "value date",
+  "tran date",
+  "tran dt",
   "trans date",
-  "transaction date (posting)",
+  "trans dt",
+  "posting date",
+  "posting dt",
+  "value date",
+  "value dt",
+  "val dt",
   "booking date",
+  "booking dt",
+  "transaction date (posting)",
 ];
+
+function normalizeHeaderKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
 
 function findColumnKey(
   headerKeys: string[],
@@ -63,6 +76,25 @@ function findColumnKey(
     if (normalized.has(alias)) return normalized.get(alias);
   }
   return undefined;
+}
+
+/**
+ * Date columns on Indian CBS/Finacle/HDFC exports are often abbreviated
+ * `Txn Dt` / `Value Dt` / `Txn. Dt`. Exact `date` aliases miss them, and
+ * `/date/i` does not match `Dt`, so every row is dropped as an invalid date.
+ */
+function findDateColumnKey(headerKeys: string[]): string | undefined {
+  const normalized = new Map(
+    headerKeys.map((k) => [normalizeHeaderKey(k), k])
+  );
+  for (const alias of DATE_COLUMN_ALIASES) {
+    const key = normalizeHeaderKey(alias);
+    if (normalized.has(key)) return normalized.get(key);
+  }
+  return headerKeys.find((h) => {
+    const n = normalizeHeaderKey(h);
+    return /\bdate\b/.test(n) || /\bdt\b/.test(n);
+  });
 }
 
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
@@ -174,10 +206,7 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
             (debitKey || creditKey
               ? undefined
               : headers.find((h) => /amount/i.test(h)));
-          dateKey =
-            findColumnKey(headers, DATE_COLUMN_ALIASES) ??
-            headers.find((h) => /date/i.test(h)) ??
-            "date";
+          dateKey = findDateColumnKey(headers) ?? "date";
           resolved = true;
         }
 
