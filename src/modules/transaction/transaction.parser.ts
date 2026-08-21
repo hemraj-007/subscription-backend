@@ -70,7 +70,11 @@ const MAX_REASONABLE_AMOUNT = 100_000_000;
 
 function parseAmount(raw: unknown): number {
   if (raw === undefined || raw === null || raw === "") return 0;
-  const s = String(raw).trim().replace(/,/g, "");
+  let s = String(raw).trim().replace(/,/g, "");
+  // Strip Indian currency prefixes before numeric cleanup. Otherwise the
+  // abbreviation period in "Rs. 649.00" survives as ".649.00" (NaN → row
+  // dropped) and "Rs. 649" becomes ".649" (imported as ₹0.65).
+  s = s.replace(/[₹]|Rs\.?|INR/gi, "").trim();
   const n = Number(s.replace(/[^\d.-]/g, ""));
   if (Number.isNaN(n)) return 0;
   const abs = Math.abs(n);
