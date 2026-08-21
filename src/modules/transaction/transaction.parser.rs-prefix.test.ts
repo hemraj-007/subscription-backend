@@ -32,7 +32,7 @@ test("CSV Rs. prefixed amounts are not dropped or truncated", async () => {
       "Date,Description,Amount",
       "03/05/2026,NETFLIX.COM,Rs. 649.00",
       "04/05/2026,Spotify Premium,Rs. 119",
-      "05/05/2026,YouTube Premium,Rs.1,299.00",
+      '05/05/2026,YouTube Premium,"Rs.1,299.00"',
     ].join("\n")
   );
 
@@ -48,7 +48,7 @@ test("CSV debit/credit columns with Rs. prefixes keep direction", async () => {
     [
       "Date,Narration,Debit,Credit,Balance",
       "03/05/2026,NETFLIX.COM,Rs. 649.00,,124351.00",
-      "01/05/2026,Salary Credit,,Rs. 48,000.00,125000.00",
+      '01/05/2026,Salary Credit,,"Rs. 48,000.00",125000.00',
     ].join("\n")
   );
 
