@@ -68,6 +68,15 @@ function findColumnKey(
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
 const MAX_REASONABLE_AMOUNT = 100_000_000;
 
+/**
+ * Ledger bookend / carry-forward rows that appear as pseudo-transactions on
+ * credit-card and passbook CSVs. Importing them as DEBIT/CREDIT corrupts spend
+ * (often by the full statement balance). Mirrors the PDF SKIP_MERCHANT and
+ * brought/carried-forward SKIP_LINE patterns.
+ */
+const SKIP_LEDGER_MERCHANT_PATTERN =
+  /^(opening\s+bal(?:ance)?\.?|closing\s+bal(?:ance)?\.?|previous\s+bal(?:ance)?\.?|outstanding\s+bal(?:ance)?\.?|brought\s+forward|carried\s+forward|b\/f|c\/f)$/i;
+
 function parseAmount(raw: unknown): number {
   if (raw === undefined || raw === null || raw === "") return 0;
   const s = String(raw).trim().replace(/,/g, "");
@@ -183,6 +192,7 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
 
         const rawMerchant = row[merchantKey] ?? row.merchant ?? row.description ?? "";
         const merchant = String(rawMerchant ?? "").trim() || "Unknown";
+        if (SKIP_LEDGER_MERCHANT_PATTERN.test(merchant)) return;
 
         // Prefer dedicated debit/credit columns; fall back to a generic amount column.
         const debit = debitKey ? parseAmount(row[debitKey]) : 0;
