@@ -91,3 +91,49 @@ test("compressed single-cell table rows parse like lines", () => {
   const salary = find(txs, "Salary");
   assert.equal(salary.type, "CREDIT");
 });
+
+test("numeric posting+value dates do not steal the transaction amount", () => {
+  const txs = fromLines(["03/05/2026 02/05/2026 NETFLIX.COM 649.00 15,000.00"]);
+  assert.equal(
+    txs.filter((t) => t.amount === 2 || t.amount === 3).length,
+    0,
+    "value-date day-of-month must not be imported as rupees"
+  );
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  assert.equal(isoDay(netflix.date), "2026-05-03");
+});
+
+test("pipe-joined dual-date table rows keep the billed amount", () => {
+  const rows = [
+    ["03/05/2026", "02/05/2026", "NETFLIX.COM", "649.00", "15000.00"],
+    ["01/05/2026", "01/05/2026", "SPOTIFY", "119.00", "14881.00"],
+  ];
+  const txs = parseTransactionsFromPdfContent(PERIOD, rows);
+  assert.equal(
+    txs.filter((t) => t.amount === 2 || t.merchant === "Unknown").length,
+    0
+  );
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(isoDay(netflix.date), "2026-05-03");
+  const spotify = find(txs, "Spotify");
+  assert.equal(spotify.amount, 119);
+});
+
+test("header table with a value-date column does not emit extra tiny DEBITs", () => {
+  const rows = [
+    ["Date", "Value Date", "Description", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "02/05/2026", "NETFLIX.COM", "649.00", "", "15000.00"],
+    ["01/05/2026", "01/05/2026", "Salary", "", "48000.00", "63000.00"],
+  ];
+  const txs = parseTransactionsFromPdfContent(PERIOD, rows);
+  assert.equal(txs.filter((t) => t.amount === 2 || t.amount === 3).length, 0);
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
