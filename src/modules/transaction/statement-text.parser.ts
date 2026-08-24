@@ -7,6 +7,10 @@ const DATE_PATTERN =
 const DATE_AT_LINE_START =
   /^(\d{1,2}-[A-Za-z]{3,9})(?:-(\d{2,4}))?\b/i;
 
+/** Same tokens as DATE_PATTERN, anchored at the start of leftover text. */
+const LEADING_DATE_TOKEN =
+  /^\s*(\d{1,2}[\s./-](?:\d{1,2}|[A-Za-z]{3,9})[\s./-]\d{2,4}|\d{4}[\s./-]\d{1,2}[\s./-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})(?!\d)/i;
+
 /** First signed amount after the date — txn value; trailing values are often running balances. */
 const TXN_SIGNED_AMOUNT =
   /([+-]\s*\d{1,3}(?:,\d{2,3})*(?:\.\d{2})?)/;
@@ -187,10 +191,35 @@ function isSkippableLine(line: string): boolean {
   return false;
 }
 
+/**
+ * Bank PDFs often put posting date and value date back-to-back. After the
+ * first date is consumed, leftover text still starts with another date whose
+ * day-of-month (`02` in `02/05/2026`) would otherwise be read as ₹2.
+ */
+function stripLeadingDateTokens(text: string): string {
+  let rest = text.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+  for (let i = 0; i < 3; i++) {
+    const next = rest.replace(LEADING_DATE_TOKEN, "").trim();
+    if (next === rest) break;
+    rest = next;
+  }
+  return rest;
+}
+
+/** True when this amount match is the start of a date, not a rupee amount. */
+function isDateShapedAmount(text: string, index: number): boolean {
+  const slice = text.slice(index);
+  return (
+    /^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}(?!\d)/.test(slice) ||
+    /^\d{4}[./-]\d{1,2}[./-]\d{1,2}(?!\d)/.test(slice) ||
+    /^\d{1,2}[./-][A-Za-z]{3,9}(?:[./-]\d{2,4})?(?!\d)/i.test(slice)
+  );
+}
+
 function parseMerchantAndAmount(
   rest: string
 ): { merchant: string; amount: number; type: TransactionKind } | null {
-  const trimmed = rest.trim();
+  const trimmed = stripLeadingDateTokens(rest);
   if (!trimmed) return null;
 
   // Prefer an explicitly signed amount: it is the transaction value, while a
@@ -209,6 +238,7 @@ function parseMerchantAndAmount(
   const tokens = Array.from(trimmed.matchAll(MONEY_TOKEN));
   for (const token of tokens) {
     if (token.index === undefined) continue;
+    if (isDateShapedAmount(trimmed, token.index)) continue;
     const amount = parseAmount(token[0]);
     if (amount <= 0) continue;
     const merchant = trimmed.slice(0, token.index).replace(/\s+/g, " ").trim();
@@ -250,6 +280,9 @@ function findAmountInText(
   for (const match of ordered) {
     const token = match[0] ?? "";
     const numeric = match[1] ?? token;
+    if (match.index !== undefined && isDateShapedAmount(text, match.index)) {
+      continue;
+    }
     const amount = parseAmount(numeric);
     if (amount > 0) return { amount, token };
   }
@@ -273,8 +306,9 @@ function parseLineToTransaction(
   if (Number.isNaN(date.getTime())) return null;
 
   const dateIdx = line.indexOf(dateMatch[0]);
-  const afterDate =
-    dateIdx >= 0 ? line.slice(dateIdx + dateMatch[0].length).trim() : line;
+  const afterDate = stripLeadingDateTokens(
+    dateIdx >= 0 ? line.slice(dateIdx + dateMatch[0].length) : line
+  );
 
   // First amount after the date is usually the txn; trailing values are often balances.
   const amountInfo = findAmountInText(afterDate, "first");
