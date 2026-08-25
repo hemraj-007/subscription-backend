@@ -57,12 +57,130 @@ function findColumnKey(
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [k.toLowerCase().replace(/^\uFEFF/, "").trim(), k])
   );
   for (const alias of aliases) {
     if (normalized.has(alias)) return normalized.get(alias);
   }
   return undefined;
+}
+
+function normalizeCsvHeader(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/^\uFEFF/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Quote-aware split so preamble scanning matches csv-parse column boundaries. */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function isDateHeaderName(header: string): boolean {
+  const n = normalizeCsvHeader(header);
+  if (!n) return false;
+  if (DATE_COLUMN_ALIASES.includes(n)) return true;
+  return /\bdate\b/.test(n);
+}
+
+function isAmountHeaderName(header: string): boolean {
+  const n = normalizeCsvHeader(header);
+  if (!n) return false;
+  if (
+    AMOUNT_COLUMN_ALIASES.includes(n) ||
+    DEBIT_COLUMN_ALIASES.includes(n) ||
+    CREDIT_COLUMN_ALIASES.includes(n)
+  ) {
+    return true;
+  }
+  return /\b(amount|debit|credit|withdrawal|deposit)\b/.test(n);
+}
+
+function isMerchantHeaderName(header: string): boolean {
+  const n = normalizeCsvHeader(header);
+  if (!n) return false;
+  if (MERCHANT_COLUMN_ALIASES.includes(n)) return true;
+  return /\b(narration|description|particulars|details|merchant|remarks|memo)\b/.test(
+    n
+  );
+}
+
+/**
+ * Score a candidate header row. Date and amount/merchant must be distinct
+ * columns so metadata like "From Date,01/05/2026" or a sentence that mentions
+ * both "date" and "amount" is not treated as the transaction table header.
+ */
+function csvHeaderScore(headers: string[]): number {
+  if (headers.length < 2) return 0;
+
+  const dateIdx: number[] = [];
+  const amountIdx: number[] = [];
+  const merchantIdx: number[] = [];
+  headers.forEach((header, i) => {
+    if (isDateHeaderName(header)) dateIdx.push(i);
+    if (isAmountHeaderName(header)) amountIdx.push(i);
+    if (isMerchantHeaderName(header)) merchantIdx.push(i);
+  });
+
+  if (dateIdx.length === 0) return 0;
+  const distinctAmount = amountIdx.some((i) => !dateIdx.includes(i));
+  const distinctMerchant = merchantIdx.some((i) => !dateIdx.includes(i));
+  if (!distinctAmount && !distinctMerchant) return 0;
+
+  return (
+    dateIdx.length * 3 +
+    (distinctAmount ? amountIdx.length * 3 : 0) +
+    (distinctMerchant ? merchantIdx.length * 2 : 0) +
+    Math.min(headers.length, 8)
+  );
+}
+
+const MAX_CSV_HEADER_SCAN_LINES = 40;
+
+/**
+ * Bank CSV exports often put title/account metadata above the real header.
+ * csv-parse `{ columns: true }` uses line 1 as headers, so those files import
+ * zero rows. Return the 1-based line number of the best header in the prefix.
+ */
+function findCsvHeaderFromLine(content: string): number {
+  const lines = content.split(/\r?\n/);
+  const scanLimit = Math.min(lines.length, MAX_CSV_HEADER_SCAN_LINES);
+  let bestLine = 1;
+  let bestScore = 0;
+
+  for (let i = 0; i < scanLimit; i++) {
+    const raw = lines[i] ?? "";
+    if (!raw.replace(/^\uFEFF/, "").trim()) continue;
+    const score = csvHeaderScore(splitCsvLine(raw));
+    if (score > bestScore) {
+      bestScore = score;
+      bestLine = i + 1;
+    }
+  }
+
+  return bestLine;
 }
 
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
@@ -157,8 +275,24 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
     let creditKey: string | undefined;
     let dateKey = "date";
 
+    let fromLine = 1;
+    try {
+      fromLine = findCsvHeaderFromLine(fs.readFileSync(filePath, "utf8"));
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
     fs.createReadStream(filePath)
-      .pipe(parse({ columns: true, trim: true, relax_column_count: true }))
+      .pipe(
+        parse({
+          columns: true,
+          trim: true,
+          relax_column_count: true,
+          bom: true,
+          from_line: fromLine,
+        })
+      )
       .on("data", (row: Record<string, unknown>) => {
         // Resolve column mapping from header names (first row)
         if (!resolved) {
