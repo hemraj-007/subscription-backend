@@ -65,6 +65,56 @@ function findColumnKey(
   return undefined;
 }
 
+/** Field separators used by bank/Excel CSV exports (EU locales use `;`, some TSV). */
+const CSV_FIELD_DELIMITERS = [",", ";", "\t"] as const;
+
+function countUnquoted(line: string, delimiter: string): number {
+  let count = 0;
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && c === delimiter) count++;
+  }
+  return count;
+}
+
+/**
+ * Pick a single delimiter from the header line. Enabling `,` and `;` at once
+ * would split unquoted Indian narrations that contain `;` (UPI;NETFLIX).
+ */
+function detectCsvDelimiter(headerLine: string): string {
+  const line = headerLine.replace(/^\uFEFF/, "");
+  let best: string = ",";
+  let bestCount = 0;
+  for (const delimiter of CSV_FIELD_DELIMITERS) {
+    const count = countUnquoted(line, delimiter);
+    if (count > bestCount) {
+      best = delimiter;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+function peekFirstNonEmptyLine(filePath: string): string {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(16384);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    const text = buf.subarray(0, n).toString("utf8");
+    for (const line of text.split(/\r?\n/)) {
+      if (line.trim().length > 0) return line;
+    }
+    return "";
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /** Reject parsed values above this (10 crore) — almost certainly a ref/account number. */
 const MAX_REASONABLE_AMOUNT = 100_000_000;
 
@@ -156,9 +206,19 @@ export const parseCSV = (filePath: string): Promise<ParsedTransaction[]> => {
     let debitKey: string | undefined;
     let creditKey: string | undefined;
     let dateKey = "date";
+    const delimiter = detectCsvDelimiter(peekFirstNonEmptyLine(filePath));
 
     fs.createReadStream(filePath)
-      .pipe(parse({ columns: true, trim: true, relax_column_count: true }))
+      .pipe(
+        parse({
+          columns: true,
+          trim: true,
+          relax_column_count: true,
+          skip_empty_lines: true,
+          bom: true,
+          delimiter,
+        })
+      )
       .on("data", (row: Record<string, unknown>) => {
         // Resolve column mapping from header names (first row)
         if (!resolved) {
