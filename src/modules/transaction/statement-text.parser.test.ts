@@ -58,6 +58,23 @@ test("long reference numbers are not read as the amount", () => {
   assert.equal(amazon.amount, 299);
 });
 
+test("header tables treat With. Amt. / Dep. Amt. as debit and credit", () => {
+  const rows = [
+    ["Date", "Narration", "With. Amt.", "Dep. Amt.", "Balance"],
+    ["03/05/2026", "NETFLIX.COM", "649.00", "", "124351.00"],
+    ["01/05/2026", "Salary Credit", "", "48000.00", "125000.00"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "NETFLIX");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
 test("header tables distinguish debit and credit columns", () => {
   const rows = [
     ["Date", "Description", "Debit", "Credit", "Balance"],
