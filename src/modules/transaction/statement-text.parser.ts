@@ -364,8 +364,8 @@ function parseFromHeaderTable(
 
   const headers = rows[headerIdx];
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
-  const debitCol = findColumnIndex(headers, ["debit"]);
-  const creditCol = findColumnIndex(headers, ["credit"]);
+  const debitCol = findColumnIndex(headers, ["debit", "with amt", "with amount"]);
+  const creditCol = findColumnIndex(headers, ["credit", "dep amt", "dep amount"]);
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);
