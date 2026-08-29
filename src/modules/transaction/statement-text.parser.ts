@@ -51,6 +51,12 @@ const AMOUNT_COLUMN_ALIASES = [
   "credit amount",
   "transaction amount (inr)",
   "txn amount",
+  "txn amt",
+  "tran amount",
+  "tran amt",
+  "trn amount",
+  "trn amt",
+  "transaction amt",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -472,8 +478,8 @@ export function parseTransactionsFromPdfContent(
   // classification wins during dedupe over the column-agnostic parsers below.
   const fromHeader = parseFromHeaderTable(rows, defaultYear);
 
-  // The compact parser handles compressed single-cell rows (and signed amounts).
-  // Skip it when a header table already produced rows to avoid DEBIT-tagging credits.
+  // Column-agnostic parsers re-read the same cells (cheque/ref numbers look
+  // like amounts). Skip them when a header table already produced rows.
   const fromCompact =
     fromHeader.length > 0 ? [] : parseFromCompactTableRows(rows, defaultYear);
 
@@ -482,7 +488,8 @@ export function parseTransactionsFromPdfContent(
       ? rows.map((row) => (row.length === 1 ? row[0] : row.join(" | ")))
       : text.split(/\r?\n/);
 
-  const fromLines = parseFromLines(lineSource, defaultYear);
+  const fromLines =
+    fromHeader.length > 0 ? [] : parseFromLines(lineSource, defaultYear);
   const merged = dedupeTransactions([
     ...fromHeader,
     ...fromCompact,

@@ -58,6 +58,22 @@ test("long reference numbers are not read as the amount", () => {
   assert.equal(amazon.amount, 299);
 });
 
+test("header tables use Txn Amt instead of a larger cheque number", () => {
+  const rows = [
+    ["Date", "Narration", "Cheque No", "Txn Amt", "Balance"],
+    ["03/05/2026", "NETFLIX.COM", "12345678", "649.00", "124351.00"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "NETFLIX");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.date.toISOString().slice(0, 10), "2026-05-03");
+  assert.equal(
+    txs.some((t) => t.amount === 12345678),
+    false
+  );
+});
+
 test("header tables distinguish debit and credit columns", () => {
   const rows = [
     ["Date", "Description", "Debit", "Credit", "Balance"],
