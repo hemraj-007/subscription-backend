@@ -51,6 +51,10 @@ const AMOUNT_COLUMN_ALIASES = [
   "credit amount",
   "transaction amount (inr)",
   "txn amount",
+  "paid out",
+  "paid in",
+  "money out",
+  "money in",
 ];
 
 const DATE_COLUMN_ALIASES = [
@@ -364,8 +368,16 @@ function parseFromHeaderTable(
 
   const headers = rows[headerIdx];
   const dateCol = findColumnIndex(headers, DATE_COLUMN_ALIASES);
-  const debitCol = findColumnIndex(headers, ["debit"]);
-  const creditCol = findColumnIndex(headers, ["credit"]);
+  const debitCol = findColumnIndex(headers, [
+    "debit",
+    "paid out",
+    "money out",
+  ]);
+  const creditCol = findColumnIndex(headers, [
+    "credit",
+    "paid in",
+    "money in",
+  ]);
   const amountCol = findColumnIndex(headers, AMOUNT_COLUMN_ALIASES);
   const merchantCol = findColumnIndex(headers, MERCHANT_COLUMN_ALIASES);
   const balanceCol = findColumnIndex(headers, ["balance"]);

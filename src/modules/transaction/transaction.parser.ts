@@ -33,6 +33,9 @@ const DEBIT_COLUMN_ALIASES = [
   "debit amount",
   "withdrawal",
   "withdrawal amount",
+  // HSBC/Barclays/Lloyds and Monzo/Starling split ledgers (not "debit"/"withdrawal").
+  "paid out",
+  "money out",
 ];
 
 const CREDIT_COLUMN_ALIASES = [
@@ -40,6 +43,8 @@ const CREDIT_COLUMN_ALIASES = [
   "credit amount",
   "deposit",
   "deposit amount",
+  "paid in",
+  "money in",
 ];
 
 const DATE_COLUMN_ALIASES = [
