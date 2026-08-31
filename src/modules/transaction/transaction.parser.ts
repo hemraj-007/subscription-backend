@@ -19,6 +19,11 @@ const MERCHANT_COLUMN_ALIASES = [
   "name",
   "payee",
   "transaction details",
+  // Finacle/CBS abbreviation: "Trans. Particulars" is not an exact "particulars" match.
+  "trans particulars",
+  "trans details",
+  "tran particulars",
+  "tran details",
 ];
 
 const AMOUNT_COLUMN_ALIASES = [
@@ -52,15 +57,20 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [normalizeHeader(k), k])
   );
   for (const alias of aliases) {
-    if (normalized.has(alias)) return normalized.get(alias);
+    const key = normalizeHeader(alias);
+    if (normalized.has(key)) return normalized.get(key);
   }
   return undefined;
 }

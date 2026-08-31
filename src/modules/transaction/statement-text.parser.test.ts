@@ -76,6 +76,24 @@ test("header tables distinguish debit and credit columns", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("header tables use Trans. Particulars as the merchant column", () => {
+  const rows = [
+    ["Date", "Trans. Particulars", "Debit", "Credit", "Balance"],
+    ["03/05/2026", "NETFLIX.COM", "649", "", "124351"],
+    ["01/05/2026", "Salary Credit", "", "48000", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "NETFLIX");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+  assert.notEqual(netflix.merchant, "03/05/2026");
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
 test("compressed single-cell table rows parse like lines", () => {
   const rows = [
     [PERIOD],
