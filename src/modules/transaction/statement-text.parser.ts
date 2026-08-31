@@ -36,6 +36,10 @@ const MERCHANT_COLUMN_ALIASES = [
   "name",
   "payee",
   "transaction details",
+  "trans particulars",
+  "trans details",
+  "tran particulars",
+  "tran details",
   "remarks",
   "memo",
 ];
