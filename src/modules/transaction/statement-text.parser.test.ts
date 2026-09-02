@@ -76,6 +76,23 @@ test("header tables distinguish debit and credit columns", () => {
   assert.equal(salary.type, "CREDIT");
 });
 
+test("header tables treat Debit Amt / Credit Amt as typed ledger columns", () => {
+  const rows = [
+    ["Date", "Description", "Debit Amt", "Credit Amt", "Balance"],
+    ["03/05/2026", "Netflix", "649", "", "124351"],
+    ["01/05/2026", "Salary", "", "48000", "125000"],
+  ];
+  const txs = parseTransactionsFromPdfContent("", rows);
+
+  const netflix = find(txs, "Netflix");
+  assert.equal(netflix.amount, 649);
+  assert.equal(netflix.type, "DEBIT");
+
+  const salary = find(txs, "Salary");
+  assert.equal(salary.amount, 48000);
+  assert.equal(salary.type, "CREDIT");
+});
+
 test("compressed single-cell table rows parse like lines", () => {
   const rows = [
     [PERIOD],

@@ -31,6 +31,7 @@ const AMOUNT_COLUMN_ALIASES = [
 const DEBIT_COLUMN_ALIASES = [
   "debit",
   "debit amount",
+  "debit amt",
   "withdrawal",
   "withdrawal amount",
 ];
@@ -38,6 +39,7 @@ const DEBIT_COLUMN_ALIASES = [
 const CREDIT_COLUMN_ALIASES = [
   "credit",
   "credit amount",
+  "credit amt",
   "deposit",
   "deposit amount",
 ];
@@ -52,15 +54,20 @@ const DATE_COLUMN_ALIASES = [
   "booking date",
 ];
 
+function normalizeHeader(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function findColumnKey(
   headerKeys: string[],
   aliases: string[]
 ): string | undefined {
   const normalized = new Map(
-    headerKeys.map((k) => [k.toLowerCase().trim(), k])
+    headerKeys.map((k) => [normalizeHeader(k), k])
   );
   for (const alias of aliases) {
-    if (normalized.has(alias)) return normalized.get(alias);
+    const key = normalizeHeader(alias);
+    if (normalized.has(key)) return normalized.get(key);
   }
   return undefined;
 }
